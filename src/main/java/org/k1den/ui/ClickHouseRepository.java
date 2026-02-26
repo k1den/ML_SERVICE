@@ -89,4 +89,50 @@ public class ClickHouseRepository {
             }
         }
     }
+
+    public List<MetricPoint> getMetricsForLastMinutes(String deviceId, String metricName, int minutesBack) {
+        List<MetricPoint> points = new ArrayList<>();
+        String sql;
+
+        // Вычисляем timestamp (в миллисекундах), который был X минут назад
+        long timeThreshold = System.currentTimeMillis() - ((long) minutesBack * 60 * 1000);
+
+        if (metricName.startsWith("DISK:")) {
+            String mountPoint = metricName.substring(5);
+            sql = "SELECT timestamp, usedPercent as val FROM disk_metrics " +
+                    "WHERE deviceId = ? AND mountPoint = ? AND timestamp >= ? ORDER BY timestamp ASC";
+
+            try (Connection conn = DriverManager.getConnection(url);
+                 PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setString(1, deviceId);
+                ps.setString(2, mountPoint);
+                ps.setLong(3, timeThreshold);
+                executeAndParseAsc(ps, points);
+            } catch (SQLException e) { e.printStackTrace(); }
+
+        } else {
+            sql = "SELECT timestamp, " + metricName + " as val FROM device_metrics " +
+                    "WHERE deviceId = ? AND timestamp >= ? ORDER BY timestamp ASC";
+
+            try (Connection conn = DriverManager.getConnection(url);
+                 PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setString(1, deviceId);
+                ps.setLong(2, timeThreshold);
+                executeAndParseAsc(ps, points);
+            } catch (SQLException e) {
+                System.err.println("Нет колонки " + metricName);
+            }
+        }
+
+        return points;
+    }
+
+    // Вспомогательный метод. Сортировка ASC сразу выдает правильный порядок (от старых к новым)
+    private void executeAndParseAsc(PreparedStatement ps, List<MetricPoint> points) throws SQLException {
+        try (ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                points.add(new MetricPoint(rs.getLong("timestamp"), rs.getDouble("val")));
+            }
+        }
+    }
 }
