@@ -135,4 +135,26 @@ public class ClickHouseRepository {
             }
         }
     }
+
+    // Метод для получения списка всех уникальных устройств из БД
+    public List<String> getAvailableDevices() {
+        List<String> devices = new ArrayList<>();
+        String sql = "SELECT DISTINCT deviceId FROM device_metrics ORDER BY deviceId";
+
+        try (Connection conn = DriverManager.getConnection(url);
+             PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                devices.add(rs.getString("deviceId"));
+            }
+        } catch (SQLException e) {
+            System.err.println("Ошибка при получении списка устройств: " + e.getMessage());
+        }
+
+        // Если база пустая, отдаем заглушку, чтобы интерфейс не сломался
+        if (devices.isEmpty()) {
+            devices.add("device-001");
+        }
+        return devices;
+    }
 }

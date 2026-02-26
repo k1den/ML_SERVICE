@@ -34,22 +34,22 @@ public class MonitoringApp extends Application {
 
     private final ClickHouseRepository repository = new ClickHouseRepository();
     private final LlmService llmService = new LlmService();
-    private final String DEVICE_ID = "device-001";
+
+    // ТЕПЕРЬ УСТРОЙСТВО ВЫБИРАЕТСЯ ДИНАМИЧЕСКИ
+    private String currentDeviceId;
 
     private final List<MetricConfig> activeMetrics = new ArrayList<>();
-
     private final Map<String, Label> statusLabels = new HashMap<>();
     private final Map<String, Label> reasonLabels = new HashMap<>();
-
     private final Map<String, XYChart.Series<Number, Number>> historySeriesMap = new HashMap<>();
     private final Map<String, XYChart.Series<Number, Number>> forecastSeriesMap = new HashMap<>();
     private final Map<String, LineChart<Number, Number>> chartsMap = new HashMap<>();
-
-    // Хранилище активных прогнозов, чтобы они не исчезали при обновлении графика
     private final Map<String, ForecastRecord> activeForecasts = new HashMap<>();
 
     private Label globalStatusLabel;
     private TabPane tabPane;
+    private FlowPane cardsPanel;
+    private Stage mainStage;
 
     public static void main(String[] args) {
         launch(args);
@@ -57,14 +57,26 @@ public class MonitoringApp extends Application {
 
     @Override
     public void start(Stage primaryStage) {
-        initMetrics();
-        primaryStage.setTitle("AI System Monitor: " + DEVICE_ID);
+        this.mainStage = primaryStage;
+
+        // Получаем список устройств и выбираем первое по умолчанию
+        List<String> devices = repository.getAvailableDevices();
+        currentDeviceId = devices.get(0);
+
+        primaryStage.setTitle("AI System Monitor: " + currentDeviceId);
 
         // --- ВЕРХНЯЯ ПАНЕЛЬ ---
         HBox header = new HBox(15);
         header.setPadding(new Insets(15));
         header.setAlignment(Pos.CENTER_LEFT);
         header.setStyle("-fx-background-color: #f4f4f4; -fx-border-color: #ddd; -fx-border-width: 0 0 1 0;");
+
+        // Выбор устройства
+        ComboBox<String> deviceBox = new ComboBox<>();
+        deviceBox.getItems().addAll(devices);
+        deviceBox.setValue(currentDeviceId);
+        deviceBox.setStyle("-fx-font-weight: bold;");
+        deviceBox.setOnAction(e -> switchDevice(deviceBox.getValue()));
 
         ComboBox<String> timeBox = new ComboBox<>();
         timeBox.getItems().addAll("5 минут", "15 минут", "30 минут");
@@ -83,25 +95,17 @@ public class MonitoringApp extends Application {
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
-        header.getChildren().addAll(new Label("Горизонт:"), timeBox, btnPredict, btnExportPdf, spacer, globalStatusLabel);
+        header.getChildren().addAll(new Label("Сервер:"), deviceBox, new Label("Горизонт:"), timeBox, btnPredict, btnExportPdf, spacer, globalStatusLabel);
 
-        // --- ГРАФИКИ И КАРТОЧКИ ---
+        // --- ЦЕНТР И НИЗ ---
         tabPane = new TabPane();
-        for (MetricConfig cfg : activeMetrics) {
-            tabPane.getTabs().add(createChartTab(cfg));
-        }
-
-        ScrollPane scrollPane = new ScrollPane();
-        FlowPane cardsPanel = new FlowPane();
+        cardsPanel = new FlowPane();
         cardsPanel.setPadding(new Insets(20));
         cardsPanel.setHgap(15);
         cardsPanel.setVgap(15);
         cardsPanel.setStyle("-fx-background-color: white;");
 
-        for (MetricConfig cfg : activeMetrics) {
-            cardsPanel.getChildren().add(createStatusCard(cfg));
-        }
-        scrollPane.setContent(cardsPanel);
+        ScrollPane scrollPane = new ScrollPane(cardsPanel);
         scrollPane.setFitToWidth(true);
         scrollPane.setPrefHeight(280);
 
@@ -111,10 +115,51 @@ public class MonitoringApp extends Application {
         root.setBottom(scrollPane);
 
         btnPredict.setOnAction(e -> runFullAnalysis(timeBox.getValue()));
-        btnExportPdf.setOnAction(e -> exportActiveTabToPdf(primaryStage, timeBox.getValue()));
+        btnExportPdf.setOnAction(e -> exportActiveTabToPdf(mainStage, timeBox.getValue()));
+
+        // Собираем интерфейс для первого устройства
+        rebuildMetricsUI();
 
         primaryStage.setScene(new Scene(root, 1200, 900));
         primaryStage.show();
+    }
+
+    // --- ЛОГИКА СМЕНЫ УСТРОЙСТВА ---
+    private void switchDevice(String newDeviceId) {
+        if (newDeviceId == null || newDeviceId.equals(currentDeviceId)) return;
+
+        currentDeviceId = newDeviceId;
+        mainStage.setTitle("AI System Monitor: " + currentDeviceId);
+
+        // Полностью перестраиваем графики и карточки под новое устройство
+        rebuildMetricsUI();
+    }
+
+    private void rebuildMetricsUI() {
+        // 1. Очищаем старые данные
+        activeMetrics.clear();
+        statusLabels.clear();
+        reasonLabels.clear();
+        historySeriesMap.clear();
+        forecastSeriesMap.clear();
+        chartsMap.clear();
+        activeForecasts.clear();
+        tabPane.getTabs().clear();
+        cardsPanel.getChildren().clear();
+
+        globalStatusLabel.setText("ОБНОВЛЕНИЕ...");
+        globalStatusLabel.setTextFill(Color.GRAY);
+
+        // 2. Инициализируем метрики для ТЕКУЩЕГО устройства
+        initMetricsForDevice(currentDeviceId);
+
+        // 3. Рисуем новые вкладки и карточки
+        for (MetricConfig cfg : activeMetrics) {
+            tabPane.getTabs().add(createChartTab(cfg));
+            cardsPanel.getChildren().add(createStatusCard(cfg));
+        }
+
+        updateGlobalStatus();
     }
 
     // --- ОБНОВЛЕНИЕ ДАННЫХ НА ГРАФИКЕ ---
@@ -126,7 +171,8 @@ public class MonitoringApp extends Application {
         histSeries.getData().clear();
         foreSeries.getData().clear();
 
-        List<MetricPoint> data = repository.getMetricsForLastMinutes(DEVICE_ID, cfg.dbKey, 30);
+        // Запрашиваем данные по конкретному устройству (currentDeviceId)
+        List<MetricPoint> data = repository.getMetricsForLastMinutes(currentDeviceId, cfg.dbKey, 30);
         for(MetricPoint p : data) {
             histSeries.getData().add(new XYChart.Data<>(p.timestamp, p.value));
         }
@@ -156,16 +202,15 @@ public class MonitoringApp extends Application {
             });
 
             CompletableFuture<Void> task = CompletableFuture.runAsync(() -> {
-                List<MetricPoint> data = repository.getMetricsForLastMinutes(DEVICE_ID, cfg.dbKey, 30);
+                // Берем историю текущего устройства
+                List<MetricPoint> data = repository.getMetricsForLastMinutes(currentDeviceId, cfg.dbKey, 30);
                 List<Double> values = new ArrayList<>();
                 for(MetricPoint p : data) values.add(p.value);
 
                 if (values.isEmpty()) return;
 
-                // Запрос в LLM (вернутся 5 точек)
                 LlmService.LlmPrediction res = llmService.predict(values, minutes, cfg.title, cfg.rules);
 
-                // --- ФОРМИРУЕМ ТРАЕКТОРИЮ ВРЕМЕНИ ---
                 MetricPoint lastRealPoint = data.get(data.size() - 1);
                 long startTime = lastRealPoint.timestamp;
                 long totalDurationMs = minutes * 60 * 1000L;
@@ -186,8 +231,7 @@ public class MonitoringApp extends Application {
                 Platform.runLater(() -> {
                     double finalTargetValue = res.predictedValues.get(res.predictedValues.size() - 1);
                     updateCardUI(cfg, finalTargetValue, res.status, res.reason);
-
-                    refreshChartData(cfg); // Перерисовываем
+                    refreshChartData(cfg);
                 });
             });
             tasks.add(task);
@@ -200,7 +244,6 @@ public class MonitoringApp extends Application {
 
     // --- СОЗДАНИЕ ГРАФИКА ---
     private Tab createChartTab(MetricConfig cfg) {
-        // Ось X (Время)
         NumberAxis xAxis = new NumberAxis();
         xAxis.setForceZeroInRange(false);
         xAxis.setAutoRanging(true);
@@ -212,24 +255,20 @@ public class MonitoringApp extends Application {
             public Number fromString(String string) { return 0; }
         });
 
-        // Ось Y (Значения)
         NumberAxis yAxis = new NumberAxis();
         yAxis.setLabel(cfg.unit);
 
         if (cfg.unit.equals("%")) {
-            // Для CPU, RAM и Дисков жестко фиксируем от 0 до 100%
             yAxis.setAutoRanging(false);
             yAxis.setLowerBound(0);
             yAxis.setUpperBound(100);
             yAxis.setTickUnit(10);
         } else if (cfg.unit.equals("°C")) {
-            // Температуру логично показывать от 20 до 100 градусов
             yAxis.setAutoRanging(false);
             yAxis.setLowerBound(20);
             yAxis.setUpperBound(100);
             yAxis.setTickUnit(10);
         } else {
-            // Для сети (байты) и процессов разрешаем графику растягиваться самому
             yAxis.setForceZeroInRange(false);
             yAxis.setTickLabelFormatter(new StringConverter<Number>() {
                 @Override
@@ -265,8 +304,6 @@ public class MonitoringApp extends Application {
         return new Tab(cfg.title, box);
     }
 
-    // --- ОСТАЛЬНЫЕ МЕТОДЫ (Экспорт PDF, Карточки, Инициализация - без изменений) ---
-
     private void exportActiveTabToPdf(Stage stage, String timeHorizon) {
         int activeTabIndex = tabPane.getSelectionModel().getSelectedIndex();
         if (activeTabIndex < 0 || activeTabIndex >= activeMetrics.size()) return;
@@ -295,7 +332,8 @@ public class MonitoringApp extends Application {
 
             document.add(new Paragraph("System Telemetry & AI Forecast Report", titleFont));
             document.add(Chunk.NEWLINE);
-            document.add(new Paragraph("Device ID: " + DEVICE_ID, subFont));
+            // Пишем актуальный ID девайса в PDF
+            document.add(new Paragraph("Device ID: " + currentDeviceId, subFont));
             document.add(new Paragraph("Metric Analyzed: " + cfg.title, textFont));
             document.add(new Paragraph("Forecast Horizon: " + timeHorizon, textFont));
             document.add(new Paragraph("Generation Date: " + new Date().toString(), textFont));
@@ -341,7 +379,7 @@ public class MonitoringApp extends Application {
         Label lblReason = reasonLabels.get(cfg.dbKey);
         if (lblStatus == null) return;
 
-        String valStr = (cfg.unit.equals("proc") || cfg.unit.equals("B") || cfg.unit.equals("count") || cfg.unit.isEmpty())
+        String valStr = (cfg.unit.equals("proc") || cfg.unit.equals("KB/s") || cfg.unit.isEmpty())
                 ? String.format("%.0f", value)
                 : String.format("%.1f", value);
 
@@ -402,27 +440,26 @@ public class MonitoringApp extends Application {
         return card;
     }
 
-    // --- ИНИЦИАЛИЗАЦИЯ МЕТРИК ---
-    private void initMetrics() {
+    // --- ИНИЦИАЛИЗАЦИЯ МЕТРИК ДЛЯ КОНКРЕТНОГО УСТРОЙСТВА ---
+    private void initMetricsForDevice(String deviceId) {
         activeMetrics.add(new MetricConfig("CPU Load", "cpuLoad", "%", "OK < 70, WARN > 70, ERROR > 90"));
         activeMetrics.add(new MetricConfig("Memory Used", "memoryUsedPercent", "%", "OK < 80, WARN > 90, ERROR > 95"));
         activeMetrics.add(new MetricConfig("Processes", "processCount", "proc", "OK < 300, WARN > 400, ERROR > 600"));
         activeMetrics.add(new MetricConfig("Temperature", "cpuTemperature", "°C", "OK < 75, WARN > 80, ERROR > 90"));
-
         activeMetrics.add(new MetricConfig("Net RX", "networkRxBytes", "KB/s", "Detect sudden spikes"));
         activeMetrics.add(new MetricConfig("Net TX", "networkTxBytes", "KB/s", "Detect sudden spikes"));
 
         try {
-            List<String> disks = repository.getDiskMountPoints(DEVICE_ID);
+            // Запрашиваем диски только для выбранного девайса
+            List<String> disks = repository.getDiskMountPoints(deviceId);
             for (String disk : disks) {
                 activeMetrics.add(new MetricConfig("Disk " + disk, "DISK:" + disk, "%", "OK < 85, WARN > 90, ERROR > 98"));
             }
         } catch (Exception e) {
-            System.err.println("Ошибка дисков: " + e.getMessage());
+            System.err.println("Ошибка получения дисков: " + e.getMessage());
         }
     }
 
-    // Вспомогательный класс для хранения данных о прогнозе
     private static class ForecastRecord {
         List<MetricPoint> points;
         public ForecastRecord(List<MetricPoint> points) {
