@@ -9,7 +9,9 @@ import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.SnapshotParameters;
-import javafx.scene.chart.*;
+import javafx.scene.chart.LineChart;
+import javafx.scene.chart.NumberAxis;
+import javafx.scene.chart.XYChart;
 import javafx.scene.control.*;
 import javafx.scene.image.WritableImage;
 import javafx.scene.layout.*;
@@ -26,8 +28,8 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.text.SimpleDateFormat;
-import java.util.*;
 import java.util.List;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 
 public class MonitoringApp extends Application {
@@ -35,7 +37,6 @@ public class MonitoringApp extends Application {
     private final ClickHouseRepository repository = new ClickHouseRepository();
     private final LlmService llmService = new LlmService();
 
-    // ТЕПЕРЬ УСТРОЙСТВО ВЫБИРАЕТСЯ ДИНАМИЧЕСКИ
     private String currentDeviceId;
 
     private final List<MetricConfig> activeMetrics = new ArrayList<>();
@@ -46,10 +47,16 @@ public class MonitoringApp extends Application {
     private final Map<String, LineChart<Number, Number>> chartsMap = new HashMap<>();
     private final Map<String, ForecastRecord> activeForecasts = new HashMap<>();
 
+    // Выносим списки на уровень класса, чтобы не было NullPointerException
+    private ComboBox<String> timeBox;
+    private ComboBox<String> engineBox;
+
     private Label globalStatusLabel;
     private TabPane tabPane;
     private FlowPane cardsPanel;
     private Stage mainStage;
+
+    private final javafx.animation.Timeline autoRefreshTimeline = new javafx.animation.Timeline();
 
     public static void main(String[] args) {
         launch(args);
@@ -59,7 +66,6 @@ public class MonitoringApp extends Application {
     public void start(Stage primaryStage) {
         this.mainStage = primaryStage;
 
-        // Получаем список устройств и выбираем первое по умолчанию
         List<String> devices = repository.getAvailableDevices();
         currentDeviceId = devices.get(0);
 
@@ -71,14 +77,17 @@ public class MonitoringApp extends Application {
         header.setAlignment(Pos.CENTER_LEFT);
         header.setStyle("-fx-background-color: #f4f4f4; -fx-border-color: #ddd; -fx-border-width: 0 0 1 0;");
 
-        // Выбор устройства
         ComboBox<String> deviceBox = new ComboBox<>();
         deviceBox.getItems().addAll(devices);
         deviceBox.setValue(currentDeviceId);
         deviceBox.setStyle("-fx-font-weight: bold;");
         deviceBox.setOnAction(e -> switchDevice(deviceBox.getValue()));
 
-        ComboBox<String> timeBox = new ComboBox<>();
+        engineBox = new ComboBox<>();
+        engineBox.getItems().addAll("AI (Llama 3)", "Математика (Своя)", "Apache Commons Math");
+        engineBox.setValue("Apache Commons Math");
+
+        timeBox = new ComboBox<>();
         timeBox.getItems().addAll("5 минут", "15 минут", "30 минут");
         timeBox.getSelectionModel().select(1);
 
@@ -95,7 +104,12 @@ public class MonitoringApp extends Application {
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
-        header.getChildren().addAll(new Label("Сервер:"), deviceBox, new Label("Горизонт:"), timeBox, btnPredict, btnExportPdf, spacer, globalStatusLabel);
+        header.getChildren().addAll(
+                new Label("Сервер:"), deviceBox,
+                new Label("Движок:"), engineBox,
+                new Label("Горизонт:"), timeBox,
+                btnPredict, btnExportPdf, spacer, globalStatusLabel
+        );
 
         // --- ЦЕНТР И НИЗ ---
         tabPane = new TabPane();
@@ -114,81 +128,24 @@ public class MonitoringApp extends Application {
         root.setCenter(tabPane);
         root.setBottom(scrollPane);
 
-        btnPredict.setOnAction(e -> runFullAnalysis(timeBox.getValue()));
+        btnPredict.setOnAction(e -> runFullAnalysis());
         btnExportPdf.setOnAction(e -> exportActiveTabToPdf(mainStage, timeBox.getValue()));
 
-        // Собираем интерфейс для первого устройства
         rebuildMetricsUI();
 
         primaryStage.setScene(new Scene(root, 1200, 900));
         primaryStage.show();
     }
 
-    // --- ЛОГИКА СМЕНЫ УСТРОЙСТВА ---
-    private void switchDevice(String newDeviceId) {
-        if (newDeviceId == null || newDeviceId.equals(currentDeviceId)) return;
+    private void runFullAnalysis() {
+        String timeStr = timeBox.getValue();
+        String selectedEngine = engineBox.getValue();
 
-        currentDeviceId = newDeviceId;
-        mainStage.setTitle("AI System Monitor: " + currentDeviceId);
-
-        // Полностью перестраиваем графики и карточки под новое устройство
-        rebuildMetricsUI();
-    }
-
-    private void rebuildMetricsUI() {
-        // 1. Очищаем старые данные
-        activeMetrics.clear();
-        statusLabels.clear();
-        reasonLabels.clear();
-        historySeriesMap.clear();
-        forecastSeriesMap.clear();
-        chartsMap.clear();
-        activeForecasts.clear();
-        tabPane.getTabs().clear();
-        cardsPanel.getChildren().clear();
-
-        globalStatusLabel.setText("ОБНОВЛЕНИЕ...");
-        globalStatusLabel.setTextFill(Color.GRAY);
-
-        // 2. Инициализируем метрики для ТЕКУЩЕГО устройства
-        initMetricsForDevice(currentDeviceId);
-
-        // 3. Рисуем новые вкладки и карточки
-        for (MetricConfig cfg : activeMetrics) {
-            tabPane.getTabs().add(createChartTab(cfg));
-            cardsPanel.getChildren().add(createStatusCard(cfg));
-        }
-
-        updateGlobalStatus();
-    }
-
-    // --- ОБНОВЛЕНИЕ ДАННЫХ НА ГРАФИКЕ ---
-    private void refreshChartData(MetricConfig cfg) {
-        XYChart.Series<Number, Number> histSeries = historySeriesMap.get(cfg.dbKey);
-        XYChart.Series<Number, Number> foreSeries = forecastSeriesMap.get(cfg.dbKey);
-        if (histSeries == null || foreSeries == null) return;
-
-        histSeries.getData().clear();
-        foreSeries.getData().clear();
-
-        // Запрашиваем данные по конкретному устройству (currentDeviceId)
-        List<MetricPoint> data = repository.getMetricsForLastMinutes(currentDeviceId, cfg.dbKey, 30);
-        for(MetricPoint p : data) {
-            histSeries.getData().add(new XYChart.Data<>(p.timestamp, p.value));
-        }
-
-        ForecastRecord fr = activeForecasts.get(cfg.dbKey);
-        if (fr != null && !data.isEmpty()) {
-            for (MetricPoint fp : fr.points) {
-                foreSeries.getData().add(new XYChart.Data<>(fp.timestamp, fp.value));
-            }
-        }
-    }
-
-    // --- ЛОГИКА АНАЛИЗА ---
-    private void runFullAnalysis(String timeStr) {
         int minutes = Integer.parseInt(timeStr.split(" ")[0]);
-        globalStatusLabel.setText("СБОР И АНАЛИЗ AI... ⏳");
+        int totalPoints = minutes * 5;
+        long totalDurationMs = minutes * 60 * 1000L;
+
+        globalStatusLabel.setText("СБОР И АНАЛИЗ... ⏳");
         globalStatusLabel.setTextFill(Color.BLUE);
 
         List<CompletableFuture<Void>> tasks = new ArrayList<>();
@@ -202,35 +159,146 @@ public class MonitoringApp extends Application {
             });
 
             CompletableFuture<Void> task = CompletableFuture.runAsync(() -> {
-                // Берем историю текущего устройства
                 List<MetricPoint> data = repository.getMetricsForLastMinutes(currentDeviceId, cfg.dbKey, 30);
+                if (data.size() < 2) return;
+
                 List<Double> values = new ArrayList<>();
                 for(MetricPoint p : data) values.add(p.value);
 
-                if (values.isEmpty()) return;
-
-                LlmService.LlmPrediction res = llmService.predict(values, minutes, cfg.title, cfg.rules);
-
-                MetricPoint lastRealPoint = data.get(data.size() - 1);
-                long startTime = lastRealPoint.timestamp;
-                long totalDurationMs = minutes * 60 * 1000L;
-
                 List<MetricPoint> forecastPoints = new ArrayList<>();
-                forecastPoints.add(new MetricPoint(startTime, lastRealPoint.value));
+                long startTime = data.get(data.size() - 1).timestamp;
+                double lastVal = data.get(data.size() - 1).value;
+                forecastPoints.add(new MetricPoint(startTime, lastVal));
 
-                int numPoints = res.predictedValues.size();
-                long stepMs = totalDurationMs / Math.max(1, numPoints);
+                String status = "OK";
+                String reason = "";
+                double finalTargetValue = lastVal;
 
-                for (int i = 0; i < numPoints; i++) {
-                    long pointTime = startTime + stepMs * (i + 1);
-                    forecastPoints.add(new MetricPoint(pointTime, res.predictedValues.get(i)));
+                if (selectedEngine.equals("AI (Llama 3)")) {
+                    LlmService.LlmPrediction res = llmService.predict(values, minutes, cfg.title, cfg.rules);
+                    status = res.status;
+                    reason = res.reason;
+
+                    if (res.predictedValues != null && !res.predictedValues.isEmpty()) {
+                        int numAiPoints = res.predictedValues.size();
+                        double aiStepMs = (double) totalDurationMs / numAiPoints;
+
+                        for (int i = 0; i < numAiPoints; i++) {
+                            long pointTime = startTime + (long) (aiStepMs * (i + 1));
+                            forecastPoints.add(new MetricPoint(pointTime, res.predictedValues.get(i)));
+                        }
+                        finalTargetValue = res.predictedValues.get(numAiPoints - 1);
+                    } else {
+                        reason = "LLM не смогла сгенерировать массив.";
+                    }
+
+                } else if (selectedEngine.equals("Математика (Своя)")) {
+                    // АЛГОРИТМ: Умная EMA (Экспоненциальная скользящая) + Контролируемый шум
+
+                    // 1. Находим "здоровый" разброс графика (игнорируя дикие пики)
+                    List<Double> sortedVals = new ArrayList<>(values);
+                    Collections.sort(sortedVals);
+                    double median = sortedVals.get(sortedVals.size() / 2); // Медиана не боится скачков до 100%
+
+                    double variance = 0;
+                    int validPoints = 0;
+                    for (double v : values) {
+                        // Считаем шум только по "нормальным" точкам
+                        if (Math.abs(v - median) < 20.0) {
+                            variance += Math.pow(v - median, 2);
+                            validPoints++;
+                        }
+                    }
+                    double stdDev = validPoints > 0 ? Math.sqrt(variance / validPoints) : 1.0;
+                    if (stdDev < 1.0) stdDev = 1.0; // Гарантируем хотя бы минимальную дрожь
+
+                    // 2. Сглаживаем историю для поиска РЕАЛЬНОГО уровня и тренда
+                    double alpha = 0.15; // Сильное сглаживание: верим истории больше, чем последнему скачку
+                    double smoothedLevel = values.get(0);
+                    double trend = 0;
+
+                    for (int i = 1; i < values.size(); i++) {
+                        double currentVal = values.get(i);
+                        double prevSmoothed = smoothedLevel;
+
+                        // ФИЛЬТР: Если точка улетела дальше 3-х отклонений от медианы (тот самый скачок до 100%)
+                        if (Math.abs(currentVal - median) > stdDev * 3) {
+                            // "Обрезаем" пик, не давая ему сломать базу
+                            currentVal = median + Math.signum(currentVal - median) * stdDev;
+                        }
+
+                        smoothedLevel = alpha * currentVal + (1 - alpha) * smoothedLevel;
+                        trend = alpha * (smoothedLevel - prevSmoothed) + (1 - alpha) * trend;
+                    }
+
+                    // 3. Генерируем прогноз
+                    long stepMs = totalDurationMs / totalPoints;
+                    double phi = 0.95; // Затухание тренда
+
+                    // ВАЖНО: Стартуем не от lastVal (который мог быть 100%), а от сглаженной базы!
+                    double currentForecastLevel = smoothedLevel;
+
+                    for (int i = 1; i <= totalPoints; i++) {
+                        trend *= phi;
+                        currentForecastLevel += trend;
+
+                        // ВОЗВРАЩАЕМ ЖИЗНЬ ГРАФИКУ:
+                        // Math.sin дает плавное волнообразное "дыхание", а random - мелкую аппаратную дрожь
+                        double noise = Math.sin(i * 0.8) * (stdDev * 0.4) + (Math.random() - 0.5) * stdDev;
+                        double predictedY = currentForecastLevel + noise;
+
+                        // Жесткие лимиты
+                        if (cfg.unit.equals("%")) predictedY = Math.min(100, Math.max(0, predictedY));
+                        else predictedY = Math.max(0, predictedY);
+
+                        forecastPoints.add(new MetricPoint(startTime + stepMs * i, predictedY));
+                    }
+
+                    // Финальное значение для правил берем БЕЗ шума, чтобы статус не моргал туда-сюда
+                    finalTargetValue = currentForecastLevel;
+
+                    // ПРИМЕНЯЕМ ПРАВИЛА
+                    status = evaluateStatus(finalTargetValue, cfg.rules);
+                    if (status.equals("ERROR")) reason = "Устойчивый тренд превышает лимиты (аномалии отфильтрованы).";
+                    else if (status.equals("WARN")) reason = "Обнаружен рост базовой нагрузки.";
+                    else reason = "Система стабильна (кратковременные пики проигнорированы).";
+
+                } else {
+                    org.apache.commons.math3.fitting.WeightedObservedPoints obs = new org.apache.commons.math3.fitting.WeightedObservedPoints();
+                    for (int i = 0; i < data.size(); i++) {
+                        obs.add(i, data.get(i).value);
+                    }
+
+                    org.apache.commons.math3.fitting.PolynomialCurveFitter fitter = org.apache.commons.math3.fitting.PolynomialCurveFitter.create(2);
+                    double[] coeff = fitter.fit(obs.toList());
+
+                    long stepMs = totalDurationMs / totalPoints;
+                    for (int i = 1; i <= totalPoints; i++) {
+                        double x = data.size() + i;
+                        double predictedY = coeff[0] + coeff[1] * x + coeff[2] * x * x;
+
+                        if (cfg.unit.equals("%")) predictedY = Math.min(100, Math.max(0, predictedY));
+                        else predictedY = Math.max(0, predictedY);
+
+                        forecastPoints.add(new MetricPoint(startTime + stepMs * i, predictedY));
+                    }
+                    finalTargetValue = forecastPoints.get(forecastPoints.size()-1).value;
+
+                    // ПРИМЕНЯЕМ ПРАВИЛА
+                    status = evaluateStatus(finalTargetValue, cfg.rules);
+                    if (status.equals("ERROR")) reason = "Превышение лимитов! Полиномиальная дуга.";
+                    else if (status.equals("WARN")) reason = "Внимание: график идет вверх. Полиномиальная дуга.";
+                    else reason = "Система стабильна. Полиномиальная дуга.";
                 }
 
                 activeForecasts.put(cfg.dbKey, new ForecastRecord(forecastPoints));
 
+                final String finalStatus = status;
+                final String finalReason = reason;
+                final double finalVal = finalTargetValue;
+
                 Platform.runLater(() -> {
-                    double finalTargetValue = res.predictedValues.get(res.predictedValues.size() - 1);
-                    updateCardUI(cfg, finalTargetValue, res.status, res.reason);
+                    updateCardUI(cfg, finalVal, finalStatus, finalReason);
                     refreshChartData(cfg);
                 });
             });
@@ -242,17 +310,74 @@ public class MonitoringApp extends Application {
         });
     }
 
-    // --- СОЗДАНИЕ ГРАФИКА ---
+    private void switchDevice(String newDeviceId) {
+        if (newDeviceId == null || newDeviceId.equals(currentDeviceId)) return;
+        currentDeviceId = newDeviceId;
+        mainStage.setTitle("AI System Monitor: " + currentDeviceId);
+        rebuildMetricsUI();
+    }
+
+    private void rebuildMetricsUI() {
+        activeMetrics.clear();
+        statusLabels.clear();
+        reasonLabels.clear();
+        historySeriesMap.clear();
+        forecastSeriesMap.clear();
+        chartsMap.clear();
+        activeForecasts.clear();
+        tabPane.getTabs().clear();
+        cardsPanel.getChildren().clear();
+
+        globalStatusLabel.setText("ОБНОВЛЕНИЕ...");
+        globalStatusLabel.setTextFill(Color.GRAY);
+
+        initMetricsForDevice(currentDeviceId);
+
+        for (MetricConfig cfg : activeMetrics) {
+            tabPane.getTabs().add(createChartTab(cfg));
+            cardsPanel.getChildren().add(createStatusCard(cfg));
+        }
+
+        updateGlobalStatus();
+    }
+
+    private void refreshChartData(MetricConfig cfg) {
+        XYChart.Series<Number, Number> histSeries = historySeriesMap.get(cfg.dbKey);
+        XYChart.Series<Number, Number> foreSeries = forecastSeriesMap.get(cfg.dbKey);
+        if (histSeries == null || foreSeries == null) return;
+
+        histSeries.getData().clear();
+        foreSeries.getData().clear();
+
+        List<MetricPoint> data = repository.getMetricsForLastMinutes(currentDeviceId, cfg.dbKey, 30);
+        for (MetricPoint p : data) {
+            histSeries.getData().add(new XYChart.Data<>(p.timestamp, p.value));
+        }
+
+        ForecastRecord fr = activeForecasts.get(cfg.dbKey);
+        if (fr != null && !data.isEmpty()) {
+            for (MetricPoint fp : fr.points) {
+                foreSeries.getData().add(new XYChart.Data<>(fp.timestamp, fp.value));
+            }
+        }
+    }
+
     private Tab createChartTab(MetricConfig cfg) {
         NumberAxis xAxis = new NumberAxis();
         xAxis.setForceZeroInRange(false);
         xAxis.setAutoRanging(true);
         xAxis.setTickLabelFormatter(new StringConverter<Number>() {
             private final SimpleDateFormat sdf = new SimpleDateFormat("HH:mm:ss");
+
             @Override
-            public String toString(Number object) { return sdf.format(new Date(object.longValue())); }
+            public String toString(Number object) {
+                return sdf.format(new Date(object.longValue()));
+            }
+
             @Override
-            public Number fromString(String string) { return 0; }
+            public Number fromString(String string) {
+                return 0;
+            }
         });
 
         NumberAxis yAxis = new NumberAxis();
@@ -272,9 +397,14 @@ public class MonitoringApp extends Application {
             yAxis.setForceZeroInRange(false);
             yAxis.setTickLabelFormatter(new StringConverter<Number>() {
                 @Override
-                public String toString(Number object) { return String.format("%.0f", object.doubleValue()); }
+                public String toString(Number object) {
+                    return String.format("%.0f", object.doubleValue());
+                }
+
                 @Override
-                public Number fromString(String string) { return 0; }
+                public Number fromString(String string) {
+                    return 0;
+                }
             });
         }
 
@@ -287,7 +417,7 @@ public class MonitoringApp extends Application {
         historySeries.setName("История");
 
         XYChart.Series<Number, Number> forecastSeries = new XYChart.Series<>();
-        forecastSeries.setName("AI Прогноз");
+        forecastSeries.setName("Прогноз");
 
         chart.getData().addAll(historySeries, forecastSeries);
 
@@ -330,9 +460,8 @@ public class MonitoringApp extends Application {
             com.itextpdf.text.Font subFont = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 14, BaseColor.BLACK);
             com.itextpdf.text.Font textFont = FontFactory.getFont(FontFactory.HELVETICA, 12, BaseColor.BLACK);
 
-            document.add(new Paragraph("System Telemetry & AI Forecast Report", titleFont));
+            document.add(new Paragraph("System Telemetry Forecast Report", titleFont));
             document.add(Chunk.NEWLINE);
-            // Пишем актуальный ID девайса в PDF
             document.add(new Paragraph("Device ID: " + currentDeviceId, subFont));
             document.add(new Paragraph("Metric Analyzed: " + cfg.title, textFont));
             document.add(new Paragraph("Forecast Horizon: " + timeHorizon, textFont));
@@ -351,7 +480,7 @@ public class MonitoringApp extends Application {
 
             document.add(Chunk.NEWLINE);
 
-            document.add(new Paragraph("--- Artificial Intelligence Conclusion ---", subFont));
+            document.add(new Paragraph("--- Analysis Conclusion ---", subFont));
             document.add(Chunk.NEWLINE);
             document.add(new Paragraph("Predicted Status: " + lblStatus.getText(), FontFactory.getFont(FontFactory.HELVETICA_BOLD, 14, BaseColor.BLUE)));
             document.add(Chunk.NEWLINE);
@@ -390,8 +519,10 @@ public class MonitoringApp extends Application {
         String style = "-fx-padding: 5; -fx-background-radius: 5; -fx-font-weight: bold; -fx-text-fill: white;";
 
         if (cleanStatus.contains("OK")) lblStatus.setStyle(style + "-fx-background-color: #198754;");
-        else if (cleanStatus.contains("WARN")) lblStatus.setStyle(style + "-fx-background-color: #ffc107; -fx-text-fill: black;");
-        else if (cleanStatus.contains("ERROR") || cleanStatus.contains("CRIT")) lblStatus.setStyle(style + "-fx-background-color: #dc3545;");
+        else if (cleanStatus.contains("WARN"))
+            lblStatus.setStyle(style + "-fx-background-color: #ffc107; -fx-text-fill: black;");
+        else if (cleanStatus.contains("ERROR") || cleanStatus.contains("CRIT"))
+            lblStatus.setStyle(style + "-fx-background-color: #dc3545;");
         else lblStatus.setStyle(style + "-fx-background-color: #6c757d;");
     }
 
@@ -440,7 +571,6 @@ public class MonitoringApp extends Application {
         return card;
     }
 
-    // --- ИНИЦИАЛИЗАЦИЯ МЕТРИК ДЛЯ КОНКРЕТНОГО УСТРОЙСТВА ---
     private void initMetricsForDevice(String deviceId) {
         activeMetrics.add(new MetricConfig("CPU Load", "cpuLoad", "%", "OK < 70, WARN > 70, ERROR > 90"));
         activeMetrics.add(new MetricConfig("Memory Used", "memoryUsedPercent", "%", "OK < 80, WARN > 90, ERROR > 95"));
@@ -450,7 +580,6 @@ public class MonitoringApp extends Application {
         activeMetrics.add(new MetricConfig("Net TX", "networkTxBytes", "KB/s", "Detect sudden spikes"));
 
         try {
-            // Запрашиваем диски только для выбранного девайса
             List<String> disks = repository.getDiskMountPoints(deviceId);
             for (String disk : disks) {
                 activeMetrics.add(new MetricConfig("Disk " + disk, "DISK:" + disk, "%", "OK < 85, WARN > 90, ERROR > 98"));
@@ -462,15 +591,55 @@ public class MonitoringApp extends Application {
 
     private static class ForecastRecord {
         List<MetricPoint> points;
+
         public ForecastRecord(List<MetricPoint> points) {
             this.points = points;
         }
     }
 
+    // --- ПАРСЕР ПРАВИЛ ДЛЯ МАТЕМАТИКИ ---
+    private String evaluateStatus(double predictedValue, String rules) {
+        // Если правил нет или это текст (как у сети), возвращаем норму
+        if (rules == null || (!rules.contains(">") && !rules.contains("<"))) return "OK";
+
+        String finalStatus = "OK";
+        try {
+            String[] parts = rules.split(",");
+            for (String part : parts) {
+                part = part.trim();
+                String[] tokens = part.split(" "); // Разбиваем "WARN > 70" на ["WARN", ">", "70"]
+                if (tokens.length >= 3) {
+                    String statusLvl = tokens[0];
+                    String operator = tokens[1];
+                    double threshold = Double.parseDouble(tokens[2]);
+
+                    boolean match = false;
+                    if (operator.equals(">") && predictedValue > threshold) match = true;
+                    else if (operator.equals("<") && predictedValue < threshold) match = true;
+                    else if (operator.equals(">=") && predictedValue >= threshold) match = true;
+                    else if (operator.equals("<=") && predictedValue <= threshold) match = true;
+
+                    if (match) {
+                        // ERROR перебивает WARN
+                        if (statusLvl.equals("ERROR")) finalStatus = "ERROR";
+                        else if (statusLvl.equals("WARN") && !finalStatus.equals("ERROR")) finalStatus = "WARN";
+                    }
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("Ошибка парсинга правил: " + rules);
+        }
+        return finalStatus;
+    }
+
     private static class MetricConfig {
         String title, dbKey, unit, rules;
+
         public MetricConfig(String t, String d, String u, String r) {
-            title = t; dbKey = d; unit = u; rules = r;
+            title = t;
+            dbKey = d;
+            unit = u;
+            rules = r;
         }
     }
 }

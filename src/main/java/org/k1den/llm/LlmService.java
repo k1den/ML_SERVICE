@@ -15,25 +15,30 @@ import java.util.List;
 public class LlmService {
 
     private static final String OLLAMA_URL = "http://localhost:11434/api/generate";
-    private static final String MODEL = "my-llama3";
+    private static final String MODEL = "my-llama3"; // Твоя модель
 
     private final HttpClient client;
     private final ObjectMapper mapper;
 
     public LlmService() {
-        this.client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(90)).build();
+        this.client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(120)).build(); // Увеличил таймаут для 150 точек
         this.mapper = new ObjectMapper();
     }
 
     public LlmPrediction predict(List<Double> history, int minutes, String title, String rules) {
+        // 1. Считаем количество точек (5 точек на каждую минуту)
+        int expectedPoints = minutes * 5;
+
         try {
-            // 5 промежуточных точек, чтобы была не рпямая линия
+            // 2. Агрессивный промпт, запрещающий прямые линии
             String prompt = String.format(
-                    "Role: Strict DevOps Monitor. Task: Analyze '%s' history (last %d points): %s. " +
-                            "Goal: Forecast EXACTLY 5 intermediate values spaced evenly over the next %d min to show the trend. " +
+                    "Role: Expert DevOps AI. Task: Analyze '%s' history: %s. " +
+                            "Goal: Forecast EXACTLY %d future values spaced evenly over the next %d minutes. " +
+                            "CRITICAL INSTRUCTION: Do NOT output a simple linear progression or straight line! Real system metrics are noisy. " +
+                            "You MUST include realistic micro-fluctuations, minor jitter, and occasional small spikes/drops along the overall trend. " +
                             "RULES: %s. " +
-                            "Output JSON ONLY: {\"predictedValues\": [<float>, <float>, <float>, <float>, <float>], \"status\": \"OK\"|\"WARN\"|\"ERROR\", \"reason\": \"<short text>\"}",
-                    title, history.size(), history.toString(), minutes, rules
+                            "Output JSON ONLY: {\"predictedValues\": [<exactly %d floats>], \"status\": \"OK\"|\"WARN\"|\"ERROR\", \"reason\": \"<short text>\"}",
+                    title, history.toString(), expectedPoints, minutes, rules, expectedPoints
             );
 
             ObjectNode json = mapper.createObjectNode();
@@ -42,9 +47,10 @@ public class LlmService {
             json.put("stream", false);
             json.put("format", "json");
 
+            // 3. Даем свободу и расширяем лимиты
             ObjectNode options = json.putObject("options");
-            options.put("num_predict", 250);
-            options.put("temperature", 0.1);
+            options.put("num_predict", 3000); // 150 точек = огромный JSON, нужен большой лимит
+            options.put("temperature", 0.6);  // Подняли температуру, чтобы появилась "дрожь" на графике
 
             HttpRequest req = HttpRequest.newBuilder()
                     .uri(URI.create(OLLAMA_URL))
@@ -69,7 +75,7 @@ public class LlmService {
                     }
                 }
 
-                // Защита, если LLM всё-таки вернула одно число
+                // Если LLM обрезала массив или не выдала его, кладем хоть что-то
                 if (values.isEmpty()) {
                     values.add(aiData.has("predictedValue") ? aiData.get("predictedValue").asDouble() : 0.0);
                 }
@@ -78,9 +84,9 @@ public class LlmService {
             }
         } catch (Exception e) {
             e.printStackTrace();
-            return new LlmPrediction(List.of(0.0), "ERROR", "AI Connection Failed: " + e.getMessage());
+            return new LlmPrediction(List.of(0.0), "ERROR", "AI Failed: " + e.getMessage());
         }
-        return new LlmPrediction(List.of(0.0), "UNKNOWN", "No response from AI");
+        return new LlmPrediction(List.of(0.0), "UNKNOWN", "No response");
     }
 
     public static class LlmPrediction {
