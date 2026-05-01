@@ -1,0 +1,9 @@
+clickhouse:
+  url: jdbc:clickhouse://localhost:8123/default
+
+kafka:
+  bootstrap:
+    servers: localhost:9092
+  topic: features_topic
+  group:
+    id: prediction-service-group

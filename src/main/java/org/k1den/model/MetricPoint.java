@@ -1,8 +1,8 @@
-package org.k1den.ui;
+package org.k1den.model;
 
 public class MetricPoint {
-    public long timestamp; // Unix time
-    public double value;   // Значение (CPU или RAM)
+    public long timestamp;
+    public double value;
 
     public MetricPoint(long timestamp, double value) {
         this.timestamp = timestamp;
