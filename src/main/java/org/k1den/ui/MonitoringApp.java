@@ -38,6 +38,8 @@ import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.*;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class MonitoringApp extends Application {
 
@@ -334,27 +336,43 @@ public class MonitoringApp extends Application {
         }
     }
 
+    private final ExecutorService dbExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "db-refresh-thread");
+        t.setDaemon(true);
+        return t;
+    });
+
     private void refreshLiveData() {
-        new Thread(() -> {
+        dbExecutor.submit(() -> {
             for (MetricConfig cfg : activeMetrics) {
-                List<MetricPoint> historyData = repository.getMetricsForLastMinutes(currentDeviceId, cfg.dbKey, 30);
-                ClickHouseRepository.PredictionData prediction = repository.getLatestPrediction(currentDeviceId, cfg.dbKey);
+                List<MetricPoint> historyData = repository.getMetricsForLastMinutes(
+                        currentDeviceId, cfg.dbKey, 30);
+                ClickHouseRepository.PredictionData prediction =
+                        repository.getLatestPrediction(currentDeviceId, cfg.dbKey);
 
                 Platform.runLater(() -> {
                     updateChart(cfg.dbKey, historyData, prediction.points);
 
-                    double currentRealVal = historyData.isEmpty() ? Double.NaN : historyData.get(historyData.size() - 1).value;
+                    double currentRealVal = historyData.isEmpty()
+                            ? Double.NaN
+                            : historyData.get(historyData.size() - 1).value;
 
-                    double predictedVal = prediction.points.isEmpty() ? currentRealVal : prediction.points.get(prediction.points.size() - 1).value;
+                    double predictedVal = prediction.points.isEmpty()
+                            ? currentRealVal
+                            : prediction.points.get(prediction.points.size() - 1).value;
 
                     updateCardUI(cfg, predictedVal, prediction.status, prediction.reason, "Прогноз: ");
-
                     updatePieChart(cfg, currentRealVal);
                 });
             }
             Platform.runLater(this::updateGlobalStatus);
             updateFleetSidebar();
-        }).start();
+        });
+    }
+
+    @Override
+    public void stop() {
+        dbExecutor.shutdownNow();
     }
 
     private void loadHistoricalData() {
@@ -396,6 +414,7 @@ public class MonitoringApp extends Application {
     private void updateChart(String dbKey, List<MetricPoint> historyData, List<MetricPoint> forecastData) {
         XYChart.Series<Number, Number> histSeries = historySeriesMap.get(dbKey);
         XYChart.Series<Number, Number> foreSeries = forecastSeriesMap.get(dbKey);
+        LineChart<Number, Number> chart = chartsMap.get(dbKey);
 
         if (histSeries != null) {
             histSeries.getData().clear();
@@ -406,22 +425,20 @@ public class MonitoringApp extends Application {
             }
         }
 
-        if (foreSeries != null) {
+        if (foreSeries != null && chart != null) {
             foreSeries.getData().clear();
-            LineChart<Number, Number> chart = chartsMap.get(dbKey);
-            if (chart != null) {
-                if (isLiveMode && forecastData != null && !forecastData.isEmpty()) {
-                    if (!chart.getData().contains(foreSeries)) {
-                        chart.getData().add(foreSeries);
-                    }
-                    for (MetricPoint p : forecastData) {
-                        if (!Double.isNaN(p.value)) {
-                            foreSeries.getData().add(new XYChart.Data<>(p.timestamp, p.value));
-                        }
-                    }
-                } else {
-                    chart.getData().remove(foreSeries);
+
+            if (isLiveMode && forecastData != null && !forecastData.isEmpty()) {
+                if (!chart.getData().contains(foreSeries)) {
+                    chart.getData().add(foreSeries);
                 }
+                for (MetricPoint p : forecastData) {
+                    if (!Double.isNaN(p.value)) {
+                        foreSeries.getData().add(new XYChart.Data<>(p.timestamp, p.value));
+                    }
+                }
+            } else {
+                chart.getData().remove(foreSeries);
             }
         }
     }
@@ -535,8 +552,14 @@ public class MonitoringApp extends Application {
         titleBar.getChildren().addAll(titleLabel, titleSpacer, closeBtn);
 
         final double[] dragOffset = new double[2];
-        titleBar.setOnMousePressed(e -> { dragOffset[0] = e.getSceneX(); dragOffset[1] = e.getSceneY(); });
-        titleBar.setOnMouseDragged(e -> { dialog.setX(e.getScreenX() - dragOffset[0]); dialog.setY(e.getScreenY() - dragOffset[1]); });
+        titleBar.setOnMousePressed(e -> {
+            dragOffset[0] = e.getSceneX();
+            dragOffset[1] = e.getSceneY();
+        });
+        titleBar.setOnMouseDragged(e -> {
+            dialog.setX(e.getScreenX() - dragOffset[0]);
+            dialog.setY(e.getScreenY() - dragOffset[1]);
+        });
 
         double[] currentSettings = repository.getSettings();
 
@@ -600,7 +623,8 @@ public class MonitoringApp extends Application {
         Scene scene = new Scene(root);
         try {
             scene.getStylesheets().add(getClass().getResource("/dark-theme.css").toExternalForm());
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+        }
 
         dialog.setScene(scene);
         dialog.showAndWait();
@@ -679,20 +703,38 @@ public class MonitoringApp extends Application {
             String labelText;
             if (isLiveMode) {
                 switch (cfg.dbKey) {
-                    case "cpuLoad": labelText = String.format("Загружен на %.1f%%", value); break;
-                    case "memoryUsedPercent": labelText = String.format("Занято %.1f%%", value); break;
-                    case "cpuTemperature": labelText = String.format("%.1f °C", value); break;
-                    case "processCount": labelText = String.format("Общее количество процессов: %.0f", value); break;
-                    default: labelText = String.format("Занято %.1f%%", value); break;
+                    case "cpuLoad":
+                        labelText = String.format("Загружен на %.1f%%", value);
+                        break;
+                    case "memoryUsedPercent":
+                        labelText = String.format("Занято %.1f%%", value);
+                        break;
+                    case "cpuTemperature":
+                        labelText = String.format("%.1f °C", value);
+                        break;
+                    case "processCount":
+                        labelText = String.format("Общее количество процессов: %.0f", value);
+                        break;
+                    default:
+                        labelText = String.format("Занято %.1f%%", value);
+                        break;
                 }
             } else {
                 switch (cfg.dbKey) {
                     case "cpuLoad":
                     case "memoryUsedPercent":
-                    case "DISK:": labelText = String.format("Максимальное достигнутое значение: %.1f%%", value); break;
-                    case "cpuTemperature": labelText = String.format("Максимальное достигнутое значение: %.1f °C", value); break;
-                    case "processCount": labelText = String.format("Максимальное количество процессов: %.0f", value); break;
-                    default: labelText = String.format("Макс. значение: %.1f %s", value, cfg.unit); break;
+                    case "DISK:":
+                        labelText = String.format("Максимальное достигнутое значение: %.1f%%", value);
+                        break;
+                    case "cpuTemperature":
+                        labelText = String.format("Максимальное достигнутое значение: %.1f °C", value);
+                        break;
+                    case "processCount":
+                        labelText = String.format("Максимальное количество процессов: %.0f", value);
+                        break;
+                    default:
+                        labelText = String.format("Макс. значение: %.1f %s", value, cfg.unit);
+                        break;
                 }
             }
             percentLabel.setText(labelText);
@@ -1033,8 +1075,14 @@ public class MonitoringApp extends Application {
         titleBar.getChildren().addAll(titleLabel, titleSpacer, closeBtn);
 
         final double[] dragOffset = new double[2];
-        titleBar.setOnMousePressed(e -> { dragOffset[0] = e.getSceneX(); dragOffset[1] = e.getSceneY(); });
-        titleBar.setOnMouseDragged(e -> { dialog.setX(e.getScreenX() - dragOffset[0]); dialog.setY(e.getScreenY() - dragOffset[1]); });
+        titleBar.setOnMousePressed(e -> {
+            dragOffset[0] = e.getSceneX();
+            dragOffset[1] = e.getSceneY();
+        });
+        titleBar.setOnMouseDragged(e -> {
+            dialog.setX(e.getScreenX() - dragOffset[0]);
+            dialog.setY(e.getScreenY() - dragOffset[1]);
+        });
 
         VBox content = new VBox(12);
         content.setPadding(new Insets(20));
@@ -1097,7 +1145,8 @@ public class MonitoringApp extends Application {
         Scene scene = new Scene(root);
         try {
             scene.getStylesheets().add(getClass().getResource("/dark-theme.css").toExternalForm());
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+        }
 
         dialog.setScene(scene);
         dialog.showAndWait();

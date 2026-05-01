@@ -73,8 +73,8 @@ public class MathEngine {
             trendY = trendY * (1.0 - pullStrength) + avg * pullStrength;
 
             int patternLength = Math.min(15, n);
-            int randomOffset = (int) (Math.random() * patternLength);
-            int patternIndex = (n - patternLength) + randomOffset;
+            int deterministicOffset = Math.abs((int)((i * 31L + lastTimestamp) % patternLength));
+            int patternIndex = (n - patternLength) + deterministicOffset;
             double historicalWiggle = deviations[patternIndex];
 
             double noiseDecay = 1.0 - (pullStrength * 0.7);

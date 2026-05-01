@@ -125,29 +125,24 @@ public class ClickHouseRepository {
     public PredictionData getLatestPrediction(String deviceId, String metricName) {
         PredictionData result = new PredictionData();
 
-        String sqlMaxTimestamp = "SELECT MAX(createdAt) as maxTime FROM predictions WHERE deviceId = ? AND metricName = ?";
-        long maxTime = 0;
+        String sql = """
+                SELECT forecastTime, predictedValue, status, reason, createdAt
+                FROM predictions
+                WHERE deviceId = ?
+                  AND metricName = ?
+                  AND createdAt = (
+                      SELECT MAX(createdAt) FROM predictions
+                      WHERE deviceId = ? AND metricName = ?
+                  )
+                ORDER BY forecastTime ASC
+                """;
+
         try (Connection conn = DriverManager.getConnection(url);
-             PreparedStatement ps = conn.prepareStatement(sqlMaxTimestamp)) {
+             PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, deviceId);
             ps.setString(2, metricName);
-            try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) maxTime = rs.getLong("maxTime");
-            }
-        } catch (SQLException e) {
-            e.printStackTrace();
-        }
-
-        if (maxTime == 0) return result;
-        result.createdAt = maxTime;
-
-        String sqlData = "SELECT forecastTime, predictedValue, status, reason FROM predictions " +
-                "WHERE deviceId = ? AND metricName = ? AND createdAt = ? ORDER BY forecastTime ASC";
-        try (Connection conn = DriverManager.getConnection(url);
-             PreparedStatement ps = conn.prepareStatement(sqlData)) {
-            ps.setString(1, deviceId);
-            ps.setString(2, metricName);
-            ps.setLong(3, maxTime);
+            ps.setString(3, deviceId);
+            ps.setString(4, metricName);
 
             try (ResultSet rs = ps.executeQuery()) {
                 boolean metaSet = false;
@@ -155,9 +150,13 @@ public class ClickHouseRepository {
                     if (!metaSet) {
                         result.status = rs.getString("status");
                         result.reason = rs.getString("reason");
+                        result.createdAt = rs.getLong("createdAt");
                         metaSet = true;
                     }
-                    result.points.add(new MetricPoint(rs.getLong("forecastTime"), rs.getDouble("predictedValue")));
+                    result.points.add(new MetricPoint(
+                            rs.getLong("forecastTime"),
+                            rs.getDouble("predictedValue")
+                    ));
                 }
             }
         } catch (SQLException e) {
@@ -264,16 +263,39 @@ public class ClickHouseRepository {
     }
 
     public String getWorstStatusForDevice(String deviceId) {
-        String[] metrics = {"cpuLoad", "memoryUsedPercent", "cpuTemperature", "processCount", "networkRxBytes", "networkTxBytes"};
+
+        String sql = """
+                SELECT metricName, status
+                FROM predictions
+                WHERE deviceId = ?
+                  AND (metricName, createdAt) IN (
+                      SELECT metricName, MAX(createdAt)
+                      FROM predictions
+                      WHERE deviceId = ?
+                      GROUP BY metricName
+                  )
+                """;
+
         boolean hasWarn = false;
-        for (String metric : metrics) {
-            PredictionData pd = getLatestPrediction(deviceId, metric);
-            if (pd.status != null) {
-                String s = pd.status.toUpperCase();
-                if (s.contains("ERROR") || s.contains("CRIT")) return "ERROR";
-                if (s.contains("WARN")) hasWarn = true;
+
+        try (Connection conn = DriverManager.getConnection(url);
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, deviceId);
+            ps.setString(2, deviceId);
+
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    String status = rs.getString("status");
+                    if (status == null) continue;
+                    String s = status.toUpperCase();
+                    if (s.contains("ERROR") || s.contains("CRIT")) return "ERROR";
+                    if (s.contains("WARN")) hasWarn = true;
+                }
             }
+        } catch (SQLException e) {
+            System.err.println("Ошибка получения статуса устройства: " + e.getMessage());
         }
+
         return hasWarn ? "WARN" : "OK";
     }
 
@@ -291,23 +313,41 @@ public class ClickHouseRepository {
                     "WHERE p.deviceId = ? AND p.metricName = ? AND p.createdAt >= ?";
             try (Connection conn = DriverManager.getConnection(url);
                  PreparedStatement ps = conn.prepareStatement(sql)) {
-                ps.setString(1, deviceId); ps.setString(2, mountPoint); ps.setLong(3, timeThreshold);
-                ps.setString(4, deviceId); ps.setString(5, metricName); ps.setLong(6, timeThreshold);
+                ps.setString(1, deviceId);
+                ps.setString(2, mountPoint);
+                ps.setLong(3, timeThreshold);
+                ps.setString(4, deviceId);
+                ps.setString(5, metricName);
+                ps.setLong(6, timeThreshold);
                 try (ResultSet rs = ps.executeQuery()) {
                     if (rs.next()) return rs.wasNull() ? -1.0 : rs.getDouble("mae");
                 }
-            } catch (SQLException e) { System.err.println("Ошибка расчета MAE дисков: " + e.getMessage()); }
+            } catch (SQLException e) {
+                System.err.println("Ошибка расчета MAE дисков: " + e.getMessage());
+            }
             return -1.0;
         }
 
         String dbColumn = metricName;
         switch (metricName) {
-            case "cpuLoad": dbColumn = "avgCpuLoad"; break;
-            case "memoryUsedPercent": dbColumn = "maxMemoryUsed"; break;
-            case "cpuTemperature": dbColumn = "avgCpuTemp"; break;
-            case "processCount": dbColumn = "avgProcesses"; break;
-            case "networkRxBytes": dbColumn = "avgNetRx"; break;
-            case "networkTxBytes": dbColumn = "avgNetTx"; break;
+            case "cpuLoad":
+                dbColumn = "avgCpuLoad";
+                break;
+            case "memoryUsedPercent":
+                dbColumn = "maxMemoryUsed";
+                break;
+            case "cpuTemperature":
+                dbColumn = "avgCpuTemp";
+                break;
+            case "processCount":
+                dbColumn = "avgProcesses";
+                break;
+            case "networkRxBytes":
+                dbColumn = "avgNetRx";
+                break;
+            case "networkTxBytes":
+                dbColumn = "avgNetTx";
+                break;
         }
 
         String sql = "SELECT avg(abs(p.predictedValue - f.val)) as mae " +
