@@ -405,11 +405,14 @@ public class MonitoringApp extends Application {
                 }
             }
         }
+
         if (foreSeries != null) {
             foreSeries.getData().clear();
-            for (MetricPoint p : forecastData) {
-                if (!Double.isNaN(p.value)) {
-                    foreSeries.getData().add(new XYChart.Data<>(p.timestamp, p.value));
+            if (isLiveMode) {
+                for (MetricPoint p : forecastData) {
+                    if (!Double.isNaN(p.value)) {
+                        foreSeries.getData().add(new XYChart.Data<>(p.timestamp, p.value));
+                    }
                 }
             }
         }
@@ -666,22 +669,23 @@ public class MonitoringApp extends Application {
             remain.setPieValue(Math.max(0, cfg.maxValue - safeValue));
 
             String labelText;
-            switch (cfg.dbKey) {
-                case "cpuLoad":
-                    labelText = String.format("Загружен на %.1f%%", value);
-                    break;
-                case "memoryUsedPercent":
-                    labelText = String.format("Занято %.1f%%", value);
-                    break;
-                case "cpuTemperature":
-                    labelText = String.format("%.1f °C", value);
-                    break;
-                case "processCount":
-                    labelText = String.format("Общее количество процессов: %.0f", value);
-                    break;
-                default:
-                    labelText = String.format("Занято %.1f%%", value);
-                    break;
+            if (isLiveMode) {
+                switch (cfg.dbKey) {
+                    case "cpuLoad": labelText = String.format("Загружен на %.1f%%", value); break;
+                    case "memoryUsedPercent": labelText = String.format("Занято %.1f%%", value); break;
+                    case "cpuTemperature": labelText = String.format("%.1f °C", value); break;
+                    case "processCount": labelText = String.format("Общее количество процессов: %.0f", value); break;
+                    default: labelText = String.format("Занято %.1f%%", value); break;
+                }
+            } else {
+                switch (cfg.dbKey) {
+                    case "cpuLoad":
+                    case "memoryUsedPercent":
+                    case "DISK:": labelText = String.format("Максимальное достигнутое значение: %.1f%%", value); break;
+                    case "cpuTemperature": labelText = String.format("Максимальное достигнутое значение: %.1f °C", value); break;
+                    case "processCount": labelText = String.format("Максимальное количество процессов: %.0f", value); break;
+                    default: labelText = String.format("Макс. значение: %.1f %s", value, cfg.unit); break;
+                }
             }
             percentLabel.setText(labelText);
 
