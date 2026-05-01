@@ -11,22 +11,6 @@ public class ClickHouseRepository {
 
     private final String url = org.k1den.util.ConfigLoader.getProperty("clickhouse.url", "jdbc:clickhouse://localhost:8123/default");
 
-    public String getDeviceInfo(String deviceId) {
-        String sql = "SELECT deviceName, hostname FROM device_metrics WHERE deviceId = ? LIMIT 1";
-        try (Connection conn = DriverManager.getConnection(url);
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, deviceId);
-            try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) {
-                    return rs.getString("deviceName") + " (" + rs.getString("hostname") + ")";
-                }
-            }
-        } catch (SQLException e) {
-            e.printStackTrace();
-        }
-        return "Unknown Device";
-    }
-
     public List<String> getDiskMountPoints(String deviceId) {
         List<String> disks = new ArrayList<>();
         String sql = "SELECT DISTINCT mountPoint FROM disk_metrics WHERE deviceId = ?";
@@ -111,14 +95,6 @@ public class ClickHouseRepository {
         return points;
     }
 
-    private void executeAndParseAsc(PreparedStatement ps, List<MetricPoint> points) throws SQLException {
-        try (ResultSet rs = ps.executeQuery()) {
-            while (rs.next()) {
-                points.add(new MetricPoint(rs.getLong("timestamp"), rs.getDouble("val")));
-            }
-        }
-    }
-
     public List<String> getAvailableDevices() {
         List<String> devices = new ArrayList<>();
         String sql = "SELECT DISTINCT deviceId FROM device_metrics ORDER BY deviceId";
@@ -193,6 +169,27 @@ public class ClickHouseRepository {
 
     public List<MetricPoint> getMetricsBetween(String deviceId, String metricName, long startMs, long endMs) {
         List<MetricPoint> points = new ArrayList<>();
+
+        if (metricName.startsWith("DISK:")) {
+            String mountPoint = metricName.substring(5);
+            String sql = "SELECT timestamp, usedPercent as val FROM disk_metrics " +
+                    "WHERE deviceId = ? AND mountPoint = ? AND timestamp >= ? AND timestamp <= ? ORDER BY timestamp ASC";
+            try (Connection conn = DriverManager.getConnection(url);
+                 PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setString(1, deviceId);
+                ps.setString(2, mountPoint);
+                ps.setLong(3, startMs);
+                ps.setLong(4, endMs);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        points.add(new MetricPoint(rs.getLong("timestamp"), rs.getDouble("val")));
+                    }
+                }
+            } catch (SQLException e) {
+                System.err.println("Ошибка чтения истории (TimeMachine) для диска " + mountPoint + ": " + e.getMessage());
+            }
+            return points;
+        }
 
         String dbColumn = metricName;
         switch (metricName) {

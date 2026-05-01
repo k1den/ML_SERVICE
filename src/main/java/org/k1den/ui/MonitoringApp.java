@@ -408,11 +408,19 @@ public class MonitoringApp extends Application {
 
         if (foreSeries != null) {
             foreSeries.getData().clear();
-            if (isLiveMode) {
-                for (MetricPoint p : forecastData) {
-                    if (!Double.isNaN(p.value)) {
-                        foreSeries.getData().add(new XYChart.Data<>(p.timestamp, p.value));
+            LineChart<Number, Number> chart = chartsMap.get(dbKey);
+            if (chart != null) {
+                if (isLiveMode && forecastData != null && !forecastData.isEmpty()) {
+                    if (!chart.getData().contains(foreSeries)) {
+                        chart.getData().add(foreSeries);
                     }
+                    for (MetricPoint p : forecastData) {
+                        if (!Double.isNaN(p.value)) {
+                            foreSeries.getData().add(new XYChart.Data<>(p.timestamp, p.value));
+                        }
+                    }
+                } else {
+                    chart.getData().remove(foreSeries);
                 }
             }
         }
