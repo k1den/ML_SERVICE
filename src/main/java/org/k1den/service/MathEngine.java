@@ -73,7 +73,7 @@ public class MathEngine {
             trendY = trendY * (1.0 - pullStrength) + avg * pullStrength;
 
             int patternLength = Math.min(15, n);
-            int deterministicOffset = Math.abs((int)((i * 31L + lastTimestamp) % patternLength));
+            int deterministicOffset = Math.abs((int) ((i * 31L + lastTimestamp) % patternLength));
             int patternIndex = (n - patternLength) + deterministicOffset;
             double historicalWiggle = deviations[patternIndex];
 
@@ -89,17 +89,35 @@ public class MathEngine {
         }
 
         if (isPercentage) {
-            if (lastValidY > 90) { result.status = "ERROR"; result.reason = "Критическая перегрузка (>90%)"; }
-            else if (lastValidY > 75) { result.status = "WARN"; result.reason = "Повышенное потребление ресурса"; }
-            else { result.status = "OK"; result.reason = "Норма"; }
+            if (lastValidY > 90) {
+                result.status = "ERROR";
+                result.reason = "Критическая перегрузка (>90%)";
+            } else if (lastValidY > 75) {
+                result.status = "WARN";
+                result.reason = "Повышенное потребление ресурса";
+            } else {
+                result.status = "OK";
+                result.reason = "Норма";
+            }
         } else if (isTemp) {
-            if (lastValidY > 85) { result.status = "ERROR"; result.reason = "Критический перегрев!"; }
-            else if (lastValidY > 70) { result.status = "WARN"; result.reason = "Температура выше нормы"; }
-            else { result.status = "OK"; result.reason = "Норма"; }
+            if (lastValidY > 85) {
+                result.status = "ERROR";
+                result.reason = "Критический перегрев!";
+            } else if (lastValidY > 70) {
+                result.status = "WARN";
+                result.reason = "Температура выше нормы";
+            } else {
+                result.status = "OK";
+                result.reason = "Норма";
+            }
         } else {
             if (lastValidY > avg * 1.5 && lastValidY > avg + (stdDev * sensitivity) && lastValidY > 50) {
-                result.status = "WARN"; result.reason = "Аномальный рост значения";
-            } else { result.status = "OK"; result.reason = "Норма"; }
+                result.status = "WARN";
+                result.reason = "Аномальный рост значения";
+            } else {
+                result.status = "OK";
+                result.reason = "Норма";
+            }
         }
 
         return result;

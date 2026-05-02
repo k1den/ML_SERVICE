@@ -21,7 +21,8 @@ public class Launcher {
 
         try {
             Thread.sleep(1000);
-        } catch (InterruptedException ignored) {}
+        } catch (InterruptedException ignored) {
+        }
 
         System.out.println("Запуск графического интерфейса...");
         MonitoringApp.main(args);

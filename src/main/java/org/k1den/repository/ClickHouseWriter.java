@@ -3,11 +3,7 @@ package org.k1den.repository;
 import org.k1den.model.PredictionPoint;
 import org.k1den.util.DatabasePool;
 
-import java.sql.Connection;
-import java.sql.DriverManager;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
+import java.sql.*;
 import java.util.List;
 
 public class ClickHouseWriter {
@@ -16,16 +12,16 @@ public class ClickHouseWriter {
     public ClickHouseWriter() {
         try (Connection conn = DriverManager.getConnection(url)) {
             conn.createStatement().execute("""
-                CREATE TABLE IF NOT EXISTS predictions (
-                    deviceId String, metricName String, createdAt UInt64, forecastTime UInt64, predictedValue Float64, status String, reason String
-                ) ENGINE = MergeTree() ORDER BY (deviceId, metricName, createdAt)
-            """);
+                        CREATE TABLE IF NOT EXISTS predictions (
+                            deviceId String, metricName String, createdAt UInt64, forecastTime UInt64, predictedValue Float64, status String, reason String
+                        ) ENGINE = MergeTree() ORDER BY (deviceId, metricName, createdAt)
+                    """);
 
             conn.createStatement().execute("""
-                CREATE TABLE IF NOT EXISTS prediction_settings (
-                    timestamp UInt64, forecastMinutes Int32, anomalySensitivity Float64
-                ) ENGINE = MergeTree() ORDER BY timestamp
-            """);
+                        CREATE TABLE IF NOT EXISTS prediction_settings (
+                            timestamp UInt64, forecastMinutes Int32, anomalySensitivity Float64
+                        ) ENGINE = MergeTree() ORDER BY timestamp
+                    """);
 
             try (ResultSet rs = conn.createStatement().executeQuery("SELECT count() FROM prediction_settings")) {
                 if (rs.next() && rs.getInt(1) == 0) {
@@ -33,7 +29,9 @@ public class ClickHouseWriter {
                 }
             }
             System.out.println("Таблицы ClickHouse готовы.");
-        } catch (SQLException e) { e.printStackTrace(); }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
     }
 
     public void savePrediction(String deviceId, String metricName, List<PredictionPoint> points, String status, String reason) {
@@ -42,13 +40,20 @@ public class ClickHouseWriter {
         try (Connection conn = DatabasePool.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             for (PredictionPoint point : points) {
-                ps.setString(1, deviceId); ps.setString(2, metricName); ps.setLong(3, createdAt);
-                ps.setLong(4, point.timestamp); ps.setDouble(5, point.value);
-                ps.setString(6, status); ps.setString(7, reason); ps.addBatch();
+                ps.setString(1, deviceId);
+                ps.setString(2, metricName);
+                ps.setLong(3, createdAt);
+                ps.setLong(4, point.timestamp);
+                ps.setDouble(5, point.value);
+                ps.setString(6, status);
+                ps.setString(7, reason);
+                ps.addBatch();
             }
             ps.executeBatch();
             System.out.println("Сохранен прогноз для " + deviceId + " (" + metricName + "), статус: " + status);
-        } catch (SQLException e) { System.err.println("Ошибка записи в ClickHouse: " + e.getMessage()); }
+        } catch (SQLException e) {
+            System.err.println("Ошибка записи в ClickHouse: " + e.getMessage());
+        }
     }
 
     public double[] getSettings() {
@@ -61,7 +66,9 @@ public class ClickHouseWriter {
                 settings[0] = rs.getDouble("forecastMinutes");
                 settings[1] = rs.getDouble("anomalySensitivity");
             }
-        } catch (SQLException e) { e.printStackTrace(); }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
         return settings;
     }
 }

@@ -75,12 +75,12 @@ public class PredictionDaemon {
     private static void processFeature(DeviceFeature feature, MathEngine mathEngine,
                                        ClickHouseWriter dbWriter, ExecutorService writerPool) {
         Map<String, Double> metrics = new LinkedHashMap<>();
-        metrics.put("cpuLoad",            feature.avgCpuLoad);
-        metrics.put("memoryUsedPercent",  feature.maxMemoryUsed);
-        metrics.put("cpuTemperature",     feature.avgCpuTemp);
-        metrics.put("networkRxBytes",     feature.avgNetRx);
-        metrics.put("networkTxBytes",     feature.avgNetTx);
-        metrics.put("processCount",       feature.avgProcesses);
+        metrics.put("cpuLoad", feature.avgCpuLoad);
+        metrics.put("memoryUsedPercent", feature.maxMemoryUsed);
+        metrics.put("cpuTemperature", feature.avgCpuTemp);
+        metrics.put("networkRxBytes", feature.avgNetRx);
+        metrics.put("networkTxBytes", feature.avgNetTx);
+        metrics.put("processCount", feature.avgProcesses);
 
         if (feature.disksUsedPercents != null) {
             feature.disksUsedPercents.forEach((mp, val) ->
@@ -89,10 +89,10 @@ public class PredictionDaemon {
 
         double[] settings = dbWriter.getSettings();
         int forecastMinutes = (int) settings[0];
-        double sensitivity  = settings[1];
+        double sensitivity = settings[1];
 
         for (Map.Entry<String, Double> entry : metrics.entrySet()) {
-            String metricName  = entry.getKey();
+            String metricName = entry.getKey();
             double currentValue = entry.getValue();
 
             Map<String, LinkedList<Double>> deviceData =
