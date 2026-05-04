@@ -53,7 +53,9 @@ public class MonitoringApp extends Application {
     private final Map<String, Label> reasonLabels = new HashMap<>();
     private final Map<String, XYChart.Series<Number, Number>> historySeriesMap = new HashMap<>();
     private final Map<String, XYChart.Series<Number, Number>> forecastSeriesMap = new HashMap<>();
+    private final Map<String, XYChart.Series<Number, Number>> savedForecastSeriesMap = new HashMap<>();
     private final Map<String, LineChart<Number, Number>> chartsMap = new HashMap<>();
+    private final java.util.Set<String> frozenMetrics = new java.util.HashSet<>();
 
     private VBox centerContainer;
     private HBox pieChartsPanel;
@@ -318,6 +320,8 @@ public class MonitoringApp extends Application {
         reasonLabels.clear();
         historySeriesMap.clear();
         forecastSeriesMap.clear();
+        savedForecastSeriesMap.clear();
+        frozenMetrics.clear();
         chartsMap.clear();
         tabPane.getTabs().clear();
         cardsPanel.getChildren().clear();
@@ -365,7 +369,10 @@ public class MonitoringApp extends Application {
                             ? currentRealVal
                             : prediction.points.get(prediction.points.size() - 1).value;
 
-                    updateCardUI(cfg, predictedVal, prediction.status, prediction.reason, "Прогноз: ");
+                    if (!frozenMetrics.contains(cfg.dbKey)) {
+                        updateCardUI(cfg, predictedVal, prediction.status, prediction.reason, "Прогноз: ");
+                    }
+
                     updatePieChart(cfg, currentRealVal);
                 });
             }
@@ -501,13 +508,93 @@ public class MonitoringApp extends Application {
         XYChart.Series<Number, Number> forecastSeries = new XYChart.Series<>();
         forecastSeries.setName("Прогноз");
 
+        XYChart.Series<Number, Number> savedSeries = new XYChart.Series<>();
+        savedSeries.setName("Запомненный прогноз");
+
+        // ВНИМАНИЕ: Здесь мы убираем savedSeries. Изначально добавляем только 2 основные линии
         chart.getData().addAll(historySeries, forecastSeries);
 
         historySeriesMap.put(cfg.dbKey, historySeries);
         forecastSeriesMap.put(cfg.dbKey, forecastSeries);
+        savedForecastSeriesMap.put(cfg.dbKey, savedSeries);
         chartsMap.put(cfg.dbKey, chart);
 
-        VBox box = new VBox(10, chart);
+        Button btnSaveForecast = new Button("📌 Запомнить прогноз");
+        btnSaveForecast.setStyle("-fx-background-color: #8b5cf6; -fx-text-fill: white; -fx-cursor: hand; -fx-font-weight: bold; -fx-background-radius: 4; -fx-padding: 5 15;");
+
+        Button btnClearForecast = new Button("🗑 Очистить");
+        btnClearForecast.setStyle("-fx-background-color: #3f3f46; -fx-text-fill: white; -fx-cursor: hand; -fx-background-radius: 4; -fx-padding: 5 15;");
+        btnClearForecast.setDisable(true);
+
+        btnSaveForecast.setOnAction(e -> {
+            XYChart.Series<Number, Number> currentForecast = forecastSeriesMap.get(cfg.dbKey);
+
+            if (currentForecast != null && !currentForecast.getData().isEmpty()) {
+                if (!chart.getData().contains(savedSeries)) {
+                    chart.getData().add(savedSeries);
+                }
+
+                savedSeries.getData().clear();
+                double lastForecastValue = Double.NaN;
+
+                for (XYChart.Data<Number, Number> data : currentForecast.getData()) {
+                    savedSeries.getData().add(new XYChart.Data<>(data.getXValue(), data.getYValue()));
+                    lastForecastValue = data.getYValue().doubleValue(); // Вытаскиваем последнее значение
+                }
+
+                Platform.runLater(() -> {
+                    javafx.scene.Node line = savedSeries.getNode();
+                    if (line != null) {
+                        line.setStyle("-fx-stroke: #a855f7; -fx-stroke-width: 2.5px; -fx-stroke-dash-array: 10 5;");
+                    }
+                });
+
+                frozenMetrics.add(cfg.dbKey);
+                Label lblStatus = statusLabels.get(cfg.dbKey);
+                Label lblReason = reasonLabels.get(cfg.dbKey);
+
+                if (lblStatus != null && lblReason != null && !Double.isNaN(lastForecastValue)) {
+                    String valStr = (cfg.unit.equals("proc") || cfg.unit.equals("B/s") || cfg.unit.isEmpty())
+                            ? String.format("%.0f", lastForecastValue)
+                            : String.format("%.1f", lastForecastValue);
+
+                    lblStatus.setText(String.format("СНАПШОТ: %s %s", valStr, cfg.unit));
+                    lblStatus.setStyle("-fx-padding: 5; -fx-background-radius: 5; -fx-font-weight: bold; -fx-text-fill: white; -fx-background-color: #a855f7;");
+                    lblReason.setText("Прогноз зафиксирован для сравнения");
+                }
+
+                btnSaveForecast.setText("✅ Зафиксировано");
+                btnSaveForecast.setDisable(true);
+                btnClearForecast.setDisable(false);
+            }
+        });
+
+        btnClearForecast.setOnAction(e -> {
+            chart.getData().remove(savedSeries);
+            savedSeries.getData().clear();
+
+            frozenMetrics.remove(cfg.dbKey);
+
+            Label lblStatus = statusLabels.get(cfg.dbKey);
+            Label lblReason = reasonLabels.get(cfg.dbKey);
+            if (lblStatus != null) {
+                lblStatus.setText("Обновление...");
+                lblStatus.setStyle("-fx-padding: 5; -fx-background-radius: 5; -fx-font-weight: bold; -fx-text-fill: white; -fx-background-color: #6c757d;");
+            }
+            if (lblReason != null) {
+                lblReason.setText("Возврат к Live-режиму");
+            }
+
+            btnSaveForecast.setText("📌 Запомнить прогноз");
+            btnSaveForecast.setDisable(false);
+            btnClearForecast.setDisable(true);
+        });
+
+        HBox controlsBox = new HBox(10, btnSaveForecast, btnClearForecast);
+        controlsBox.setAlignment(Pos.CENTER_RIGHT);
+        controlsBox.setPadding(new Insets(0, 20, 0, 0));
+
+        VBox box = new VBox(10, controlsBox, chart);
         box.setPadding(new Insets(10));
         return new Tab(cfg.title, box);
     }
