@@ -117,7 +117,7 @@ public class MonitoringApp extends Application {
         Button btnExportPdf = createHeaderButton("📄 ЭКСПОРТ АУДИТА", "#f43f5e");
         btnExportPdf.setOnAction(e -> exportActiveTabToPdf(mainStage));
 
-        Button btnAccuracy = createHeaderButton("🎯 ТОЧНОСТЬ (MAE)", "#14b8a6");
+        Button btnAccuracy = createHeaderButton("ОЦЕНИТЬ ТОЧНОСТЬ ПРОГНОЗА", "#14b8a6");
         btnAccuracy.setOnAction(e -> showAccuracyDialog());
 
         Button btnSettings = createHeaderButton("⚙ НАСТРОЙКИ", "#a1a1aa");
@@ -511,7 +511,6 @@ public class MonitoringApp extends Application {
         XYChart.Series<Number, Number> savedSeries = new XYChart.Series<>();
         savedSeries.setName("Запомненный прогноз");
 
-        // ВНИМАНИЕ: Здесь мы убираем savedSeries. Изначально добавляем только 2 основные линии
         chart.getData().addAll(historySeries, forecastSeries);
 
         historySeriesMap.put(cfg.dbKey, historySeries);
@@ -519,11 +518,8 @@ public class MonitoringApp extends Application {
         savedForecastSeriesMap.put(cfg.dbKey, savedSeries);
         chartsMap.put(cfg.dbKey, chart);
 
-        Button btnSaveForecast = new Button("📌 Запомнить прогноз");
-        btnSaveForecast.setStyle("-fx-background-color: #8b5cf6; -fx-text-fill: white; -fx-cursor: hand; -fx-font-weight: bold; -fx-background-radius: 4; -fx-padding: 5 15;");
-
-        Button btnClearForecast = new Button("🗑 Очистить");
-        btnClearForecast.setStyle("-fx-background-color: #3f3f46; -fx-text-fill: white; -fx-cursor: hand; -fx-background-radius: 4; -fx-padding: 5 15;");
+        Button btnSaveForecast = createHeaderButton("ЗАПОМНИТЬ ПРОГНОЗ", "#a855f7");
+        Button btnClearForecast = createHeaderButton("🗑 ОЧИСТИТЬ", "#a1a1aa");
         btnClearForecast.setDisable(true);
 
         btnSaveForecast.setOnAction(e -> {
@@ -539,7 +535,7 @@ public class MonitoringApp extends Application {
 
                 for (XYChart.Data<Number, Number> data : currentForecast.getData()) {
                     savedSeries.getData().add(new XYChart.Data<>(data.getXValue(), data.getYValue()));
-                    lastForecastValue = data.getYValue().doubleValue(); // Вытаскиваем последнее значение
+                    lastForecastValue = data.getYValue().doubleValue();
                 }
 
                 Platform.runLater(() -> {
@@ -563,7 +559,7 @@ public class MonitoringApp extends Application {
                     lblReason.setText("Прогноз зафиксирован для сравнения");
                 }
 
-                btnSaveForecast.setText("✅ Зафиксировано");
+                btnSaveForecast.setText("ЗАФИКСИРОВАНО");
                 btnSaveForecast.setDisable(true);
                 btnClearForecast.setDisable(false);
             }
@@ -585,7 +581,7 @@ public class MonitoringApp extends Application {
                 lblReason.setText("Возврат к Live-режиму");
             }
 
-            btnSaveForecast.setText("📌 Запомнить прогноз");
+            btnSaveForecast.setText("ЗАПОМНИТЬ ПРОГНОЗ");
             btnSaveForecast.setDisable(false);
             btnClearForecast.setDisable(true);
         });
