@@ -82,6 +82,8 @@ public class MonitoringApp extends Application {
     private boolean isMaximizedCustom = false;
     private double normalX, normalY, normalWidth, normalHeight;
 
+    private ComboBox<String> deviceBox;
+
     public static void main(String[] args) {
         launch(args);
     }
@@ -104,7 +106,7 @@ public class MonitoringApp extends Application {
         Label lblSrv = new Label("Сервер:");
         lblSrv.setTextFill(Color.WHITE);
 
-        ComboBox<String> deviceBox = new ComboBox<>();
+        deviceBox = new ComboBox<>();
         deviceBox.getItems().addAll(devices);
         deviceBox.setValue(currentDeviceId);
         deviceBox.setStyle("-fx-font-weight: bold;");
@@ -367,9 +369,23 @@ public class MonitoringApp extends Application {
                     updatePieChart(cfg, currentRealVal);
                 });
             }
-            Platform.runLater(this::updateGlobalStatus);
+            Platform.runLater(() -> {
+                updateGlobalStatus();
+                refreshDeviceBox();
+            });
             updateFleetSidebar();
         });
+    }
+
+    private void refreshDeviceBox() {
+        List<String> devices = repository.getAvailableDevices();
+        String selected = deviceBox.getValue();
+        deviceBox.getItems().setAll(devices);
+        if (selected != null && devices.contains(selected)) {
+            deviceBox.setValue(selected);
+        } else if (!devices.isEmpty()) {
+            deviceBox.setValue(devices.get(0));
+        }
     }
 
     @Override
