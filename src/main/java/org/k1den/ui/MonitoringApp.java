@@ -503,10 +503,10 @@ public class MonitoringApp extends Application {
         chart.setCreateSymbols(false);
 
         XYChart.Series<Number, Number> historySeries = new XYChart.Series<>();
-        historySeries.setName("История (Реальность)");
+        historySeries.setName("LIVE(История)");
 
         XYChart.Series<Number, Number> forecastSeries = new XYChart.Series<>();
-        forecastSeries.setName("Прогноз");
+        forecastSeries.setName("Текущий прогноз");
 
         XYChart.Series<Number, Number> savedSeries = new XYChart.Series<>();
         savedSeries.setName("Запомненный прогноз");

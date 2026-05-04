@@ -49,12 +49,20 @@
     -fx-stroke: #fba71b;
 }
 
+.default-color2.chart-series-line {
+    -fx-stroke: #a855f7;
+}
+
 .default-color0.chart-legend-item-symbol {
     -fx-background-color: #f3622d;
 }
 
 .default-color1.chart-legend-item-symbol {
     -fx-background-color: #fba71b;
+}
+
+.default-color2.chart-legend-item-symbol {
+    -fx-background-color: #a855f7;
 }
 
 .status-card {
