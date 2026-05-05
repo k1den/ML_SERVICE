@@ -15,6 +15,8 @@ import javafx.scene.chart.LineChart;
 import javafx.scene.chart.NumberAxis;
 import javafx.scene.chart.XYChart;
 import javafx.scene.control.*;
+import javafx.scene.canvas.Canvas;
+import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.image.WritableImage;
 import javafx.scene.layout.*;
 import javafx.scene.paint.Color;
@@ -59,8 +61,7 @@ public class MonitoringApp extends Application {
 
     private VBox centerContainer;
     private HBox pieChartsPanel;
-    private final Map<String, javafx.scene.chart.PieChart.Data> pieCurrentDataMap = new HashMap<>();
-    private final Map<String, javafx.scene.chart.PieChart.Data> pieRemainDataMap = new HashMap<>();
+    private final Map<String, Canvas> pieCanvasMap = new HashMap<>();
     private final Map<String, Label> piePercentLabelsMap = new HashMap<>();
 
     private Label globalStatusLabel;
@@ -226,7 +227,7 @@ public class MonitoringApp extends Application {
 
         VBox topContainer = new VBox(titleBar, header);
 
-        pieChartsPanel = new HBox(15);
+        pieChartsPanel = new HBox(0);
         pieChartsPanel.setAlignment(Pos.CENTER_LEFT);
         pieChartsPanel.setPadding(new Insets(10, 10, 10, 10));
 
@@ -235,7 +236,7 @@ public class MonitoringApp extends Application {
         pieScroll.setVbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
         pieScroll.setHbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
         pieScroll.setStyle("-fx-background-color: transparent; -fx-background: transparent; -fx-border-color: transparent;");
-        pieScroll.setMinHeight(160);
+        pieScroll.setMinHeight(200);
 
         centerContainer = new VBox(tabPane, pieScroll);
         VBox.setVgrow(tabPane, Priority.ALWAYS);
@@ -326,8 +327,7 @@ public class MonitoringApp extends Application {
         tabPane.getTabs().clear();
         cardsPanel.getChildren().clear();
 
-        pieCurrentDataMap.clear();
-        pieRemainDataMap.clear();
+        pieCanvasMap.clear();
         piePercentLabelsMap.clear();
         if (pieChartsPanel != null) pieChartsPanel.getChildren().clear();
 
@@ -752,54 +752,90 @@ public class MonitoringApp extends Application {
     }
 
     private VBox createPieChartWidget(MetricConfig cfg) {
-        javafx.scene.chart.PieChart pieChart = new javafx.scene.chart.PieChart();
-        pieChart.getStyleClass().add("status-pie");
+        final int SIZE = 100;
+        Canvas canvas = new Canvas(SIZE, SIZE);
+        pieCanvasMap.put(cfg.dbKey, canvas);
 
-        pieChart.setPrefSize(130, 130);
-        pieChart.setMinSize(130, 130);
-        pieChart.setMaxSize(130, 130);
-        pieChart.setLegendVisible(false);
-        pieChart.setLabelsVisible(false);
-
-        javafx.scene.chart.PieChart.Data currentData = new javafx.scene.chart.PieChart.Data("Занято", 0);
-        javafx.scene.chart.PieChart.Data remainData = new javafx.scene.chart.PieChart.Data("Свободно", cfg.maxValue);
-        pieChart.getData().addAll(currentData, remainData);
-
-        pieCurrentDataMap.put(cfg.dbKey, currentData);
-        pieRemainDataMap.put(cfg.dbKey, remainData);
+        // Draw initial empty state
+        drawDonut(canvas, 0, cfg.maxValue);
 
         Label title = new Label(cfg.title);
         title.setTextFill(Color.LIGHTGRAY);
         title.setFont(Font.font("System", FontWeight.BOLD, 11));
+        title.setWrapText(true);
+        title.setAlignment(Pos.CENTER);
+        title.setTextAlignment(javafx.scene.text.TextAlignment.CENTER);
+        title.setMaxHeight(Double.MAX_VALUE);
 
         Label percentLabel = new Label("Занято: 0.0%");
         percentLabel.setTextFill(Color.WHITE);
-        percentLabel.setFont(Font.font("System", 12));
+        percentLabel.setFont(Font.font("System", 11));
+        percentLabel.setWrapText(true);
+        percentLabel.setAlignment(Pos.CENTER);
+        percentLabel.setTextAlignment(javafx.scene.text.TextAlignment.CENTER);
+        percentLabel.setMaxHeight(Double.MAX_VALUE);
         piePercentLabelsMap.put(cfg.dbKey, percentLabel);
 
-        VBox box = new VBox(2, pieChart, title, percentLabel);
-        box.setAlignment(Pos.CENTER);
+        VBox box = new VBox(4, canvas, title, percentLabel);
+        box.setAlignment(Pos.TOP_CENTER);
+        box.setPrefWidth(160);
+        box.setMinWidth(160);
+        box.setMaxWidth(160);
+        box.setPadding(new Insets(0, 8, 0, 8));
         return box;
     }
 
+    /**
+     * Draws a donut (ring) chart on the given Canvas.
+     * The occupied arc is drawn in red (#dc3545), the free portion in green (#198754).
+     */
+    private void drawDonut(Canvas canvas, double occupied, double maxValue) {
+        GraphicsContext gc = canvas.getGraphicsContext2D();
+        double w = canvas.getWidth();
+        double h = canvas.getHeight();
+
+        // Clear background (transparent)
+        gc.clearRect(0, 0, w, h);
+
+        double cx = w / 2.0;
+        double cy = h / 2.0;
+        double radius = Math.min(w, h) / 2.0 - 10;
+        double strokeWidth = 13;
+        double diameter = radius * 2;
+        double x = cx - radius;
+        double y = cy - radius;
+
+        double fraction = (maxValue > 0) ? Math.min(occupied / maxValue, 1.0) : 0.0;
+        double occupiedDeg = fraction * 360.0;
+
+        // Draw full green background ring
+        gc.setStroke(Color.web("#198754"));
+        gc.setLineWidth(strokeWidth);
+        gc.strokeOval(x, y, diameter, diameter);
+
+        // Draw red occupied arc on top (from -90° = top, clockwise)
+        if (occupiedDeg > 0) {
+            gc.setStroke(Color.web("#dc3545"));
+            gc.strokeArc(x, y, diameter, diameter, 90, -occupiedDeg,
+                    javafx.scene.shape.ArcType.OPEN);
+        }
+    }
+
     private void updatePieChart(MetricConfig cfg, double value) {
-        javafx.scene.chart.PieChart.Data current = pieCurrentDataMap.get(cfg.dbKey);
-        javafx.scene.chart.PieChart.Data remain = pieRemainDataMap.get(cfg.dbKey);
+        Canvas canvas = pieCanvasMap.get(cfg.dbKey);
         Label percentLabel = piePercentLabelsMap.get(cfg.dbKey);
 
-        if (current != null && remain != null && percentLabel != null) {
+        if (canvas != null && percentLabel != null) {
 
             if (Double.isNaN(value)) {
-                current.setPieValue(0);
-                remain.setPieValue(cfg.maxValue);
+                drawDonut(canvas, 0, cfg.maxValue);
                 percentLabel.setText("НЕДОСТУПНО");
                 percentLabel.setTextFill(Color.web("#6c757d"));
                 return;
             }
 
             double safeValue = Math.min(value, cfg.maxValue);
-            current.setPieValue(safeValue);
-            remain.setPieValue(Math.max(0, cfg.maxValue - safeValue));
+            drawDonut(canvas, safeValue, cfg.maxValue);
 
             String labelText;
             if (isLiveMode) {
