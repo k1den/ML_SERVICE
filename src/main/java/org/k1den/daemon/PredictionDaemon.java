@@ -27,6 +27,13 @@ public class PredictionDaemon {
             .build();
     private static final int WRITER_THREADS = 4;
 
+    private static final Cache<String, Long> sustainedAnomalyStart = Caffeine.newBuilder()
+            .expireAfterAccess(1, TimeUnit.DAYS)
+            .build();
+
+    private static final double SUSTAINED_TRACK_THRESHOLD = 90.0;
+    private static final double SUSTAINED_TEMP_THRESHOLD  = 70.0;
+
     public static void main(String[] args) {
         ObjectMapper mapper = new ObjectMapper();
         ClickHouseWriter dbWriter = new ClickHouseWriter();
@@ -61,9 +68,7 @@ public class PredictionDaemon {
                 for (ConsumerRecord<String, String> record : records) {
                     try {
                         DeviceFeature feature = mapper.readValue(record.value(), DeviceFeature.class);
-
                         processFeature(feature, mathEngine, dbWriter, writerPool);
-
                     } catch (Exception e) {
                         System.err.println("Ошибка обработки сообщения: " + e.getMessage());
                     }
@@ -102,14 +107,18 @@ public class PredictionDaemon {
             history.add(currentValue);
             if (history.size() > HISTORY_WINDOW_SIZE) history.removeFirst();
 
+            long sustainedMs = updateSustainedTracker(
+                    feature.deviceId, metricName, currentValue, feature.windowEndTimestamp);
+
             if (history.size() >= 10) {
                 List<Double> historySnapshot = new ArrayList<>(history);
+                final long finalSustainedMs = sustainedMs;
 
                 writerPool.submit(() -> {
                     try {
                         MathEngine.PredictionResult result = mathEngine.predictPolynomial(
                                 historySnapshot, feature.windowEndTimestamp,
-                                metricName, forecastMinutes, sensitivity);
+                                metricName, forecastMinutes, sensitivity, finalSustainedMs);
                         dbWriter.savePrediction(feature.deviceId, metricName,
                                 result.points, result.status, result.reason);
                     } catch (Exception e) {
@@ -120,24 +129,43 @@ public class PredictionDaemon {
         }
     }
 
-    private static void processMetric(String deviceId, String metricName, double currentValue, long timestamp, MathEngine mathEngine, ClickHouseWriter dbWriter) {
-        Map<String, LinkedList<Double>> deviceData = metricsHistory.get(deviceId, k -> new HashMap<>());
+    private static long updateSustainedTracker(String deviceId, String metricName,
+                                               double currentValue, long eventTimestampMs) {
+        String key = deviceId + "::" + metricName;
 
-        deviceData.putIfAbsent(metricName, new LinkedList<>());
-        LinkedList<Double> history = deviceData.get(metricName);
+        boolean isAboveThreshold = isAboveAnomalyThreshold(metricName, currentValue);
 
-        history.add(currentValue);
-        if (history.size() > HISTORY_WINDOW_SIZE) {
-            history.removeFirst();
+        if (isAboveThreshold) {
+            Long firstSeenAt = null;
+            try {
+                firstSeenAt = sustainedAnomalyStart.getIfPresent(key);
+            } catch (Exception ignored) {}
+
+            if (firstSeenAt == null) {
+                sustainedAnomalyStart.put(key, eventTimestampMs);
+                return 0L;
+            } else {
+                return Math.max(0, eventTimestampMs - firstSeenAt);
+            }
+        } else {
+            sustainedAnomalyStart.invalidate(key);
+            return 0L;
+        }
+    }
+
+    private static boolean isAboveAnomalyThreshold(String metricName, double value) {
+        boolean isTemp = metricName.toLowerCase().contains("temp");
+        if (isTemp) {
+            return value >= SUSTAINED_TEMP_THRESHOLD;
         }
 
-        if (history.size() >= 10) {
-            double[] settings = dbWriter.getSettings();
-            int forecastMinutes = (int) settings[0];
-            double sensitivity = settings[1];
-
-            MathEngine.PredictionResult result = mathEngine.predictPolynomial(history, timestamp, metricName, forecastMinutes, sensitivity);
-            dbWriter.savePrediction(deviceId, metricName, result.points, result.status, result.reason);
+        boolean isPercentage = metricName.toLowerCase().contains("load")
+                || metricName.toLowerCase().contains("percent")
+                || metricName.startsWith("DISK:");
+        if (isPercentage) {
+            return value >= SUSTAINED_TRACK_THRESHOLD;
         }
+
+        return false;
     }
 }

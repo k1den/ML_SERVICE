@@ -7,13 +7,28 @@ import java.util.List;
 
 public class MathEngine {
 
+    public static final long SUSTAINED_WARN_THRESHOLD_MS = 5 * 60 * 1000L; // 5 минут
+
+    private static final double SUSTAINED_VALUE_THRESHOLD = 90.0;
+
     public static class PredictionResult {
         public List<PredictionPoint> points = new ArrayList<>();
         public String status = "OK";
         public String reason = "Норма";
     }
 
-    public PredictionResult predictPolynomial(List<Double> historyValues, long lastTimestamp, String metricName, int forecastMinutes, double sensitivity) {
+    /**
+     * @param historyValues  история значений метрики
+     * @param lastTimestamp  временная метка последнего значения (мс)
+     * @param metricName     название метрики
+     * @param forecastMinutes горизонт прогноза в минутах
+     * @param sensitivity    чувствительность к аномалиям
+     * @param sustainedMs    как долго (мс) значение уже непрерывно держится выше порога;
+     *                       0 если превышения нет или оно только что началось
+     */
+    public PredictionResult predictPolynomial(List<Double> historyValues, long lastTimestamp,
+                                              String metricName, int forecastMinutes,
+                                              double sensitivity, long sustainedMs) {
         PredictionResult result = new PredictionResult();
         int n = historyValues.size();
         if (n < 3) return result;
@@ -95,6 +110,10 @@ public class MathEngine {
             } else if (lastValidY > 75) {
                 result.status = "WARN";
                 result.reason = "Повышенное потребление ресурса";
+            } else if (sustainedMs >= SUSTAINED_WARN_THRESHOLD_MS) {
+                long sustainedMinutes = sustainedMs / 60_000;
+                result.status = "WARN";
+                result.reason = "Длительная нагрузка >90% уже " + sustainedMinutes + " мин";
             } else {
                 result.status = "OK";
                 result.reason = "Норма";
@@ -106,6 +125,10 @@ public class MathEngine {
             } else if (lastValidY > 70) {
                 result.status = "WARN";
                 result.reason = "Температура выше нормы";
+            } else if (sustainedMs >= SUSTAINED_WARN_THRESHOLD_MS && historyValues.get(n - 1) > 70) {
+                long sustainedMinutes = sustainedMs / 60_000;
+                result.status = "WARN";
+                result.reason = "Повышенная температура держится " + sustainedMinutes + " мин";
             } else {
                 result.status = "OK";
                 result.reason = "Норма";
