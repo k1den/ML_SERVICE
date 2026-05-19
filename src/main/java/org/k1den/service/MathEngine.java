@@ -119,13 +119,13 @@ public class MathEngine {
                 result.reason = "Норма";
             }
         } else if (isTemp) {
-            if (lastValidY > 85) {
+            if (lastValidY >= 100) {
                 result.status = "ERROR";
                 result.reason = "Критический перегрев!";
-            } else if (lastValidY > 70) {
+            } else if (lastValidY > 85) {
                 result.status = "WARN";
                 result.reason = "Температура выше нормы";
-            } else if (sustainedMs >= SUSTAINED_WARN_THRESHOLD_MS && historyValues.get(n - 1) > 70) {
+            } else if (sustainedMs >= SUSTAINED_WARN_THRESHOLD_MS && historyValues.get(n - 1) > 85) {
                 long sustainedMinutes = sustainedMs / 60_000;
                 result.status = "WARN";
                 result.reason = "Повышенная температура держится " + sustainedMinutes + " мин";

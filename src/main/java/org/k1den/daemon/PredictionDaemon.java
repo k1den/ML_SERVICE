@@ -32,7 +32,7 @@ public class PredictionDaemon {
             .build();
 
     private static final double SUSTAINED_TRACK_THRESHOLD = 90.0;
-    private static final double SUSTAINED_TEMP_THRESHOLD  = 70.0;
+    private static final double SUSTAINED_TEMP_THRESHOLD  = 85.0;
 
     public static void main(String[] args) {
         ObjectMapper mapper = new ObjectMapper();
