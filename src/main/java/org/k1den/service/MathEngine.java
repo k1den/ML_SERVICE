@@ -7,9 +7,7 @@ import java.util.List;
 
 public class MathEngine {
 
-    public static final long SUSTAINED_WARN_THRESHOLD_MS = 5 * 60 * 1000L; // 5 минут
-
-    private static final double SUSTAINED_VALUE_THRESHOLD = 90.0;
+    public static final long SUSTAINED_WARN_THRESHOLD_MS = 5 * 60 * 1000L;
 
     public static class PredictionResult {
         public List<PredictionPoint> points = new ArrayList<>();
@@ -87,13 +85,17 @@ public class MathEngine {
             double pullStrength = (double) i / futurePoints;
             trendY = trendY * (1.0 - pullStrength) + avg * pullStrength;
 
-            int patternLength = Math.min(15, n);
-            int deterministicOffset = Math.abs((int) ((i * 31L + lastTimestamp) % patternLength));
-            int patternIndex = (n - patternLength) + deterministicOffset;
-            double historicalWiggle = deviations[patternIndex];
+            int validHistoryWindow = n / 2;
+            if (validHistoryWindow == 0) validHistoryWindow = 1;
 
-            double noiseDecay = 1.0 - (pullStrength * 0.7);
-            double predictedY = trendY + (historicalWiggle * noiseDecay);
+            int lookbackIndex = (n - validHistoryWindow) + (i % validHistoryWindow);
+            if (lookbackIndex >= n) lookbackIndex = n - 1;
+
+            double honestWiggle = deviations[lookbackIndex];
+
+            double noiseDecay = Math.max(0, 1.0 - (pullStrength * 1.5));
+
+            double predictedY = trendY + (honestWiggle * noiseDecay);
 
             predictedY = Math.max(0, predictedY);
             if (isPercentage) predictedY = Math.min(100, predictedY);

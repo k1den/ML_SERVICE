@@ -351,34 +351,42 @@ public class MonitoringApp extends Application {
     });
 
     private void refreshLiveData() {
+        final String deviceIdSnapshot = currentDeviceId;
+        final List<MetricConfig> metricsSnapshot = new ArrayList<>(activeMetrics);
+
         dbExecutor.submit(() -> {
-            for (MetricConfig cfg : activeMetrics) {
+            for (MetricConfig cfg : metricsSnapshot) {
                 List<MetricPoint> historyData = repository.getMetricsForLastMinutes(
-                        currentDeviceId, cfg.dbKey, 30);
+                        deviceIdSnapshot, cfg.dbKey, 30);
                 ClickHouseRepository.PredictionData prediction =
-                        repository.getLatestPrediction(currentDeviceId, cfg.dbKey);
+                        repository.getLatestPrediction(deviceIdSnapshot, cfg.dbKey);
 
                 Platform.runLater(() -> {
-                    updateChart(cfg.dbKey, historyData, prediction.points);
+                    if (deviceIdSnapshot.equals(currentDeviceId)) {
+                        updateChart(cfg.dbKey, historyData, prediction.points);
 
-                    double currentRealVal = historyData.isEmpty()
-                            ? Double.NaN
-                            : historyData.get(historyData.size() - 1).value;
+                        double currentRealVal = historyData.isEmpty()
+                                ? Double.NaN
+                                : historyData.get(historyData.size() - 1).value;
 
-                    double predictedVal = prediction.points.isEmpty()
-                            ? currentRealVal
-                            : prediction.points.get(prediction.points.size() - 1).value;
+                        double predictedVal = prediction.points.isEmpty()
+                                ? currentRealVal
+                                : prediction.points.get(prediction.points.size() - 1).value;
 
-                    if (!frozenMetrics.contains(cfg.dbKey)) {
-                        updateCardUI(cfg, predictedVal, prediction.status, prediction.reason, "Прогноз: ");
+                        if (!frozenMetrics.contains(cfg.dbKey)) {
+                            updateCardUI(cfg, predictedVal, prediction.status, prediction.reason, "Прогноз: ");
+                        }
+
+                        updatePieChart(cfg, currentRealVal);
                     }
-
-                    updatePieChart(cfg, currentRealVal);
                 });
             }
+
             Platform.runLater(() -> {
-                updateGlobalStatus();
-                refreshDeviceBox();
+                if (deviceIdSnapshot.equals(currentDeviceId)) {
+                    updateGlobalStatus();
+                    refreshDeviceBox();
+                }
             });
             updateFleetSidebar();
         });
@@ -387,12 +395,18 @@ public class MonitoringApp extends Application {
     private void refreshDeviceBox() {
         List<String> devices = repository.getAvailableDevices();
         String selected = deviceBox.getValue();
+
+        deviceBox.setOnAction(null);
+
         deviceBox.getItems().setAll(devices);
+
         if (selected != null && devices.contains(selected)) {
             deviceBox.setValue(selected);
         } else if (!devices.isEmpty()) {
             deviceBox.setValue(devices.get(0));
         }
+
+        deviceBox.setOnAction(e -> switchDevice(deviceBox.getValue()));
     }
 
     @Override
@@ -916,8 +930,8 @@ public class MonitoringApp extends Application {
         activeMetrics.add(new MetricConfig("Использование Памяти", "memoryUsedPercent", "%", 100));
         activeMetrics.add(new MetricConfig("Температура", "cpuTemperature", "°C", 100));
         activeMetrics.add(new MetricConfig("Количество Процессов", "processCount", "proc", 1000));
-        activeMetrics.add(new MetricConfig("Сеть (Входящий)", "networkRxBytes", "B/s", 10000000));
-        activeMetrics.add(new MetricConfig("Сеть (Исходящий)", "networkTxBytes", "B/s", 1000000));
+        activeMetrics.add(new MetricConfig("Сеть (Входящий)", "networkRxBytes", "B/s", 125000000));
+        activeMetrics.add(new MetricConfig("Сеть (Исходящий)", "networkTxBytes", "B/s", 125000000));
 
         List<String> diskMountPoints = repository.getDiskMountPoints(currentDeviceId);
 
@@ -1239,7 +1253,7 @@ public class MonitoringApp extends Application {
         content.getChildren().addAll(subtitle, desc);
 
         for (MetricConfig cfg : activeMetrics) {
-            double mae = repository.calculateMAE(currentDeviceId, cfg.dbKey, 24);
+            double mae = repository.calculateMAE(currentDeviceId, cfg.dbKey, 1);
 
             HBox row = new HBox(10);
             row.setAlignment(Pos.CENTER_LEFT);
@@ -1258,10 +1272,21 @@ public class MonitoringApp extends Application {
                 val.setText("Недостаточно истории");
                 val.setTextFill(Color.web("#dc3545"));
             } else {
-                val.setText(String.format("Отклонение: %.2f %s", mae, cfg.unit));
-                if (mae < (cfg.maxValue * 0.05)) {
+                if (cfg.unit.equals("B/s")) {
+                    double mbMae = mae / (1024.0 * 1024.0);
+                    val.setText(String.format("Отклонение: %.2f MB/s", mbMae));
+                } else {
+                    val.setText(String.format("Отклонение: %.2f %s", mae, cfg.unit));
+                }
+
+                boolean isVolatile = cfg.dbKey.equals("cpuLoad") || cfg.dbKey.equals("cpuTemperature");
+
+                double greenThreshold = isVolatile ? 0.15 : 0.10;
+                double warningThreshold = isVolatile ? 0.25 : 0.20;
+
+                if (mae < (cfg.maxValue * greenThreshold)) {
                     val.setTextFill(Color.web("#198754"));
-                } else if (mae < (cfg.maxValue * 0.15)) {
+                } else if (mae < (cfg.maxValue * warningThreshold)) {
                     val.setTextFill(Color.web("#ffc107"));
                 } else {
                     val.setTextFill(Color.web("#dc3545"));

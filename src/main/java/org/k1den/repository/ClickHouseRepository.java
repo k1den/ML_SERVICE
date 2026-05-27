@@ -301,6 +301,7 @@ public class ClickHouseRepository {
 
     public double calculateMAE(String deviceId, String metricName, int hoursBack) {
         long timeThreshold = System.currentTimeMillis() - ((long) hoursBack * 3600 * 1000);
+        long now = System.currentTimeMillis();
 
         if (metricName.startsWith("DISK:")) {
             String mountPoint = metricName.substring(5);
@@ -310,7 +311,9 @@ public class ClickHouseRepository {
                     "  FROM disk_metrics " +
                     "  WHERE deviceId = ? AND mountPoint = ? AND timestamp >= ? " +
                     ") f ON p.deviceId = f.deviceId AND p.forecastTime >= f.ts " +
-                    "WHERE p.deviceId = ? AND p.metricName = ? AND p.createdAt >= ?";
+                    "WHERE p.deviceId = ? AND p.metricName = ? AND p.createdAt >= ? " +
+                    "AND p.forecastTime > p.createdAt AND p.forecastTime <= ?";
+
             try (Connection conn = DriverManager.getConnection(url);
                  PreparedStatement ps = conn.prepareStatement(sql)) {
                 ps.setString(1, deviceId);
@@ -319,6 +322,7 @@ public class ClickHouseRepository {
                 ps.setString(4, deviceId);
                 ps.setString(5, metricName);
                 ps.setLong(6, timeThreshold);
+                ps.setLong(7, now);
                 try (ResultSet rs = ps.executeQuery()) {
                     if (rs.next()) return rs.wasNull() ? -1.0 : rs.getDouble("mae");
                 }
@@ -357,7 +361,8 @@ public class ClickHouseRepository {
                 "  FROM metrics_features " +
                 "  WHERE deviceId = ? AND timestamp >= ? " +
                 ") f ON p.deviceId = f.deviceId AND p.forecastTime >= f.ts " +
-                "WHERE p.deviceId = ? AND p.metricName = ? AND p.createdAt >= ?";
+                "WHERE p.deviceId = ? AND p.metricName = ? AND p.createdAt >= ? " +
+                "AND p.forecastTime > p.createdAt AND p.forecastTime <= ?";
 
         try (Connection conn = DatabasePool.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -366,6 +371,7 @@ public class ClickHouseRepository {
             ps.setString(3, deviceId);
             ps.setString(4, metricName);
             ps.setLong(5, timeThreshold);
+            ps.setLong(6, now);
 
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
