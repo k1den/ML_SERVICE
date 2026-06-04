@@ -63,6 +63,7 @@ public class MonitoringApp extends Application {
     private HBox pieChartsPanel;
     private final Map<String, Canvas> pieCanvasMap = new HashMap<>();
     private final Map<String, Label> piePercentLabelsMap = new HashMap<>();
+    private final Map<String, Label> pieTitleLabelsMap = new HashMap<>();
 
     private Label globalStatusLabel;
     private ToggleButton modeToggleBtn;
@@ -87,6 +88,13 @@ public class MonitoringApp extends Application {
 
     private ComboBox<String> deviceBox;
 
+    private boolean isDarkTheme = true;
+    private Scene mainScene;
+    private HBox mainHeader;
+    private HBox mainTitleBar;
+    private Label lblSrv;
+    private Label appTitle;
+
     public static void main(String[] args) {
         launch(args);
     }
@@ -105,8 +113,9 @@ public class MonitoringApp extends Application {
         header.setPadding(new Insets(15));
         header.setAlignment(Pos.CENTER_LEFT);
         header.setStyle("-fx-background-color: #2b2b2b; -fx-text-fill: white;");
+        this.mainHeader = header;
 
-        Label lblSrv = new Label("Сервер:");
+        lblSrv = new Label("Сервер:");
         lblSrv.setTextFill(Color.WHITE);
 
         deviceBox = new ComboBox<>();
@@ -152,7 +161,13 @@ public class MonitoringApp extends Application {
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
-        header.getChildren().addAll(lblSrv, deviceBox, btnExportPdf, btnAccuracy, btnSettings, modeToggleBtn, historyControls, spacer, globalStatusLabel);
+        Button btnTheme = new Button("☀ Светлая тема");
+        updateThemeButtonStyle(btnTheme);
+        btnTheme.setOnMouseEntered(e -> btnTheme.setStyle("-fx-background-color: #facc15; -fx-text-fill: #1a1a1a; -fx-border-color: #facc15; -fx-border-width: 1; -fx-border-radius: 5; -fx-padding: 6 16 6 16; -fx-font-weight: bold; -fx-cursor: hand;"));
+        btnTheme.setOnMouseExited(e -> updateThemeButtonStyle(btnTheme));
+        btnTheme.setOnAction(e -> toggleTheme(btnTheme));
+
+        header.getChildren().addAll(lblSrv, deviceBox, btnExportPdf, btnAccuracy, btnSettings, modeToggleBtn, historyControls, spacer, btnTheme, globalStatusLabel);
 
         modeToggleBtn.setOnAction(e -> toggleMode());
         loadHistoryBtn.setOnAction(e -> loadHistoricalData());
@@ -174,8 +189,9 @@ public class MonitoringApp extends Application {
         HBox titleBar = new HBox();
         titleBar.setAlignment(Pos.CENTER_RIGHT);
         titleBar.setStyle("-fx-background-color: #1a1a1a;");
+        this.mainTitleBar = titleBar;
 
-        Label appTitle = new Label("Мониторинг и прогнозирование");
+        appTitle = new Label("Мониторинг и прогнозирование");
         appTitle.setTextFill(Color.LIGHTGRAY);
         appTitle.setFont(Font.font("System", FontWeight.BOLD, 12));
         appTitle.setPadding(new Insets(0, 0, 0, 15));
@@ -253,6 +269,7 @@ public class MonitoringApp extends Application {
         startAutoRefresh();
 
         Scene scene = new Scene(root, 1450, 900);
+        this.mainScene = scene;
 
         try {
             scene.getStylesheets().add(getClass().getResource("/dark-theme.css").toExternalForm());
@@ -329,6 +346,7 @@ public class MonitoringApp extends Application {
 
         pieCanvasMap.clear();
         piePercentLabelsMap.clear();
+        pieTitleLabelsMap.clear();
         if (pieChartsPanel != null) pieChartsPanel.getChildren().clear();
 
         initMetricsForDevice();
@@ -650,11 +668,11 @@ public class MonitoringApp extends Application {
 
         HBox titleBar = new HBox();
         titleBar.setAlignment(Pos.CENTER_LEFT);
-        titleBar.setStyle("-fx-background-color: #1a1a1a;");
+        titleBar.setStyle(isDarkTheme ? "-fx-background-color: #1a1a1a;" : "-fx-background-color: #cbd5e1;");
         titleBar.setPrefHeight(32);
 
         Label titleLabel = new Label("  ⚙  Настройки прогнозирования");
-        titleLabel.setTextFill(Color.LIGHTGRAY);
+        titleLabel.setTextFill(isDarkTheme ? Color.LIGHTGRAY : Color.web("#1a1a1a"));
         titleLabel.setFont(Font.font("System", FontWeight.BOLD, 12));
         titleLabel.setPadding(new Insets(0, 0, 0, 6));
 
@@ -691,7 +709,7 @@ public class MonitoringApp extends Application {
 
         Label forecastLabel = new Label("Горизонт прогноза: " + (int) forecastSlider.getValue() + " мин.");
         forecastLabel.setFont(Font.font("System", FontWeight.BOLD, 13));
-        forecastLabel.setTextFill(Color.WHITE);
+        forecastLabel.setTextFill(isDarkTheme ? Color.WHITE : Color.web("#1a1a1a"));
         forecastSlider.valueProperty().addListener((obs, old, val) ->
                 forecastLabel.setText("Горизонт прогноза: " + val.intValue() + " мин."));
 
@@ -703,9 +721,9 @@ public class MonitoringApp extends Application {
 
         Label sensLabel = new Label("Чувствительность к скачкам: " + String.format("%.1f", sensSlider.getValue()));
         sensLabel.setFont(Font.font("System", FontWeight.BOLD, 13));
-        sensLabel.setTextFill(Color.WHITE);
+        sensLabel.setTextFill(isDarkTheme ? Color.WHITE : Color.web("#1a1a1a"));
         Label sensHint = new Label("(1.0 = Строгая, реагирует на всё | 6.0 = Мягкая, игнорирует шум)");
-        sensHint.setTextFill(Color.GRAY);
+        sensHint.setTextFill(isDarkTheme ? Color.GRAY : Color.web("#555555"));
         sensHint.setWrapText(true);
         sensSlider.valueProperty().addListener((obs, old, val) ->
                 sensLabel.setText("Чувствительность к скачкам: " + String.format("%.1f", val.doubleValue())));
@@ -713,7 +731,7 @@ public class MonitoringApp extends Application {
         VBox content = new VBox(15, subtitle, forecastLabel, forecastSlider, sensLabel, sensHint, sensSlider);
         content.setPadding(new Insets(20));
         content.setPrefWidth(380);
-        content.setStyle("-fx-background-color: #2b2b2b;");
+        content.setStyle(isDarkTheme ? "-fx-background-color: #2b2b2b;" : "-fx-background-color: #f8fafc;");
 
         Button okBtn = new Button("OK");
         okBtn.setStyle("-fx-background-color: #6c757d; -fx-text-fill: white; -fx-font-weight: bold; -fx-cursor: hand; -fx-padding: 6 24 6 24;");
@@ -724,7 +742,9 @@ public class MonitoringApp extends Application {
         });
 
         Button cancelBtn = new Button("Отмена");
-        cancelBtn.setStyle("-fx-background-color: #3f3f46; -fx-text-fill: #cccccc; -fx-cursor: hand; -fx-padding: 6 16 6 16;");
+        cancelBtn.setStyle(isDarkTheme
+                ? "-fx-background-color: #3f3f46; -fx-text-fill: #cccccc; -fx-cursor: hand; -fx-padding: 6 16 6 16;"
+                : "-fx-background-color: #e2e8f0; -fx-text-fill: #1a1a1a; -fx-cursor: hand; -fx-padding: 6 16 6 16;");
         cancelBtn.setOnAction(e -> dialog.close());
 
         HBox btnRow = new HBox(10, cancelBtn, okBtn);
@@ -733,11 +753,11 @@ public class MonitoringApp extends Application {
         content.getChildren().add(btnRow);
 
         VBox root = new VBox(titleBar, content);
-        root.setStyle("-fx-border-color: #444444; -fx-border-width: 1;");
+        root.setStyle(isDarkTheme ? "-fx-border-color: #444444; -fx-border-width: 1;" : "-fx-border-color: #cbd5e1; -fx-border-width: 1;");
 
         Scene scene = new Scene(root);
         try {
-            scene.getStylesheets().add(getClass().getResource("/dark-theme.css").toExternalForm());
+            scene.getStylesheets().add(getClass().getResource(isDarkTheme ? "/dark-theme.css" : "/light-theme.css").toExternalForm());
         } catch (Exception ignored) {
         }
 
@@ -770,19 +790,19 @@ public class MonitoringApp extends Application {
         Canvas canvas = new Canvas(SIZE, SIZE);
         pieCanvasMap.put(cfg.dbKey, canvas);
 
-        // Draw initial empty state
         drawDonut(canvas, 0, cfg.maxValue);
 
         Label title = new Label(cfg.title);
-        title.setTextFill(Color.LIGHTGRAY);
+        title.setTextFill(isDarkTheme ? Color.LIGHTGRAY : Color.web("#333333"));
         title.setFont(Font.font("System", FontWeight.BOLD, 11));
         title.setWrapText(true);
         title.setAlignment(Pos.CENTER);
         title.setTextAlignment(javafx.scene.text.TextAlignment.CENTER);
         title.setMaxHeight(Double.MAX_VALUE);
+        pieTitleLabelsMap.put(cfg.dbKey, title);
 
         Label percentLabel = new Label("Занято: 0.0%");
-        percentLabel.setTextFill(Color.WHITE);
+        percentLabel.setTextFill(isDarkTheme ? Color.WHITE : Color.web("#1a1a1a"));
         percentLabel.setFont(Font.font("System", 11));
         percentLabel.setWrapText(true);
         percentLabel.setAlignment(Pos.CENTER);
@@ -799,16 +819,11 @@ public class MonitoringApp extends Application {
         return box;
     }
 
-    /**
-     * Draws a donut (ring) chart on the given Canvas.
-     * The occupied arc is drawn in red (#dc3545), the free portion in green (#198754).
-     */
     private void drawDonut(Canvas canvas, double occupied, double maxValue) {
         GraphicsContext gc = canvas.getGraphicsContext2D();
         double w = canvas.getWidth();
         double h = canvas.getHeight();
 
-        // Clear background (transparent)
         gc.clearRect(0, 0, w, h);
 
         double cx = w / 2.0;
@@ -822,12 +837,10 @@ public class MonitoringApp extends Application {
         double fraction = (maxValue > 0) ? Math.min(occupied / maxValue, 1.0) : 0.0;
         double occupiedDeg = fraction * 360.0;
 
-        // Draw full green background ring
         gc.setStroke(Color.web("#198754"));
         gc.setLineWidth(strokeWidth);
         gc.strokeOval(x, y, diameter, diameter);
 
-        // Draw red occupied arc on top (from -90° = top, clockwise)
         if (occupiedDeg > 0) {
             gc.setStroke(Color.web("#dc3545"));
             gc.strokeArc(x, y, diameter, diameter, 90, -occupiedDeg,
@@ -894,7 +907,7 @@ public class MonitoringApp extends Application {
             if (percentOccupied >= 85.0) {
                 percentLabel.setTextFill(Color.web("#dc3545"));
             } else {
-                percentLabel.setTextFill(Color.WHITE);
+                percentLabel.setTextFill(isDarkTheme ? Color.WHITE : Color.web("#1a1a1a"));
             }
         }
     }
@@ -1147,9 +1160,8 @@ public class MonitoringApp extends Application {
             fleetSidebar = new VBox(8);
             fleetSidebar.setPadding(new Insets(15));
             fleetSidebar.setPrefWidth(220);
-
-            fleetSidebar.setStyle("-fx-background-color: #1e1e1e; -fx-border-color: #444444; -fx-border-width: 0 0 0 1;");
         }
+        applySidebarTheme();
 
         new Thread(() -> {
             List<String> devices = repository.getAvailableDevices();
@@ -1164,7 +1176,7 @@ public class MonitoringApp extends Application {
 
                 Label title = new Label("СТАТУС ФЛОТА");
                 title.setFont(Font.font("System", FontWeight.BOLD, 14));
-                title.setTextFill(Color.GRAY);
+                title.setTextFill(isDarkTheme ? Color.GRAY : Color.web("#555555"));
                 title.setPadding(new Insets(0, 0, 10, 0));
                 fleetSidebar.getChildren().add(title);
 
@@ -1186,12 +1198,14 @@ public class MonitoringApp extends Application {
                     }
 
                     Label name = new Label(devId);
-                    name.setTextFill(Color.WHITE);
+                    name.setTextFill(isDarkTheme ? Color.WHITE : Color.web("#1a1a1a"));
                     name.setFont(Font.font("System", 13));
 
                     if (devId.equals(currentDeviceId)) {
                         name.setFont(Font.font("System", FontWeight.BOLD, 13));
-                        row.setStyle("-fx-background-color: #3f3f46; -fx-background-radius: 5;");
+                        row.setStyle(isDarkTheme
+                                ? "-fx-background-color: #3f3f46; -fx-background-radius: 5;"
+                                : "-fx-background-color: #dde3ea; -fx-background-radius: 5;");
                     }
 
                     row.getChildren().addAll(dot, name);
@@ -1209,11 +1223,11 @@ public class MonitoringApp extends Application {
 
         HBox titleBar = new HBox();
         titleBar.setAlignment(Pos.CENTER_LEFT);
-        titleBar.setStyle("-fx-background-color: #1a1a1a;");
+        titleBar.setStyle(isDarkTheme ? "-fx-background-color: #1a1a1a;" : "-fx-background-color: #cbd5e1;");
         titleBar.setPrefHeight(32);
 
         Label titleLabel = new Label("  Оценка точности прогноза (MAE)");
-        titleLabel.setTextFill(Color.LIGHTGRAY);
+        titleLabel.setTextFill(isDarkTheme ? Color.LIGHTGRAY : Color.web("#1a1a1a"));
         titleLabel.setFont(Font.font("System", FontWeight.BOLD, 12));
         titleLabel.setPadding(new Insets(0, 0, 0, 6));
 
@@ -1238,7 +1252,7 @@ public class MonitoringApp extends Application {
         VBox content = new VBox(12);
         content.setPadding(new Insets(20));
         content.setPrefWidth(500);
-        content.setStyle("-fx-background-color: #2b2b2b;");
+        content.setStyle(isDarkTheme ? "-fx-background-color: #2b2b2b;" : "-fx-background-color: #f8fafc;");
 
         Label subtitle = new Label("Аудит математической модели: " + currentDeviceId);
         subtitle.setFont(Font.font("System", FontWeight.BOLD, 13));
@@ -1247,7 +1261,7 @@ public class MonitoringApp extends Application {
         Label desc = new Label("Метрика MAE (Mean Absolute Error) рассчитывается на стороне БД (ClickHouse ASOF JOIN). " +
                 "Показывает среднее отклонение предсказанного значения от фактического за последние 24 часа. " +
                 "Чем меньше значение, тем точнее работает алгоритм.");
-        desc.setTextFill(Color.GRAY);
+        desc.setTextFill(isDarkTheme ? Color.GRAY : Color.web("#555555"));
         desc.setWrapText(true);
 
         content.getChildren().addAll(subtitle, desc);
@@ -1258,12 +1272,14 @@ public class MonitoringApp extends Application {
             HBox row = new HBox(10);
             row.setAlignment(Pos.CENTER_LEFT);
             row.setPadding(new Insets(7, 12, 7, 12));
-            row.setStyle("-fx-background-color: #333333; -fx-background-radius: 6;");
+            row.setStyle(isDarkTheme
+                    ? "-fx-background-color: #333333; -fx-background-radius: 6;"
+                    : "-fx-background-color: #e9eef5; -fx-background-radius: 6;");
 
             Label name = new Label(cfg.title + ":");
             name.setPrefWidth(220);
             name.setFont(Font.font("System", FontWeight.BOLD, 13));
-            name.setTextFill(Color.WHITE);
+            name.setTextFill(isDarkTheme ? Color.WHITE : Color.web("#1a1a1a"));
 
             Label val = new Label();
             val.setFont(Font.font("System", FontWeight.BOLD, 13));
@@ -1302,16 +1318,80 @@ public class MonitoringApp extends Application {
         content.getChildren().add(btnRow);
 
         VBox root = new VBox(titleBar, content);
-        root.setStyle("-fx-border-color: #444444; -fx-border-width: 1;");
+        root.setStyle(isDarkTheme ? "-fx-border-color: #444444; -fx-border-width: 1;" : "-fx-border-color: #cbd5e1; -fx-border-width: 1;");
 
         Scene scene = new Scene(root);
         try {
-            scene.getStylesheets().add(getClass().getResource("/dark-theme.css").toExternalForm());
+            scene.getStylesheets().add(getClass().getResource(isDarkTheme ? "/dark-theme.css" : "/light-theme.css").toExternalForm());
         } catch (Exception ignored) {
         }
 
         dialog.setScene(scene);
         dialog.showAndWait();
+    }
+
+    private void toggleTheme(Button btnTheme) {
+        isDarkTheme = !isDarkTheme;
+        mainScene.getStylesheets().clear();
+        String cssResource = isDarkTheme ? "/dark-theme.css" : "/light-theme.css";
+        try {
+            mainScene.getStylesheets().add(getClass().getResource(cssResource).toExternalForm());
+        } catch (NullPointerException e) {
+            System.err.println("Файл " + cssResource + " не найден в папке resources!");
+        }
+        if (isDarkTheme) {
+            mainHeader.setStyle("-fx-background-color: #2b2b2b; -fx-text-fill: white;");
+            mainTitleBar.setStyle("-fx-background-color: #1a1a1a;");
+            lblSrv.setTextFill(Color.WHITE);
+            globalStatusLabel.setTextFill(Color.WHITE);
+            appTitle.setTextFill(Color.LIGHTGRAY);
+            for (javafx.scene.Node node : historyControls.getChildren()) {
+                if (node instanceof Label) ((Label) node).setTextFill(Color.WHITE);
+            }
+        } else {
+            mainHeader.setStyle("-fx-background-color: #e2e8f0; -fx-text-fill: #1a1a1a;");
+            mainTitleBar.setStyle("-fx-background-color: #cbd5e1;");
+            lblSrv.setTextFill(Color.web("#1a1a1a"));
+            globalStatusLabel.setTextFill(Color.web("#1a1a1a"));
+            appTitle.setTextFill(Color.web("#333333"));
+            for (javafx.scene.Node node : historyControls.getChildren()) {
+                if (node instanceof Label) ((Label) node).setTextFill(Color.web("#1a1a1a"));
+            }
+        }
+        applySidebarTheme();
+        updateFleetSidebar();
+
+        Color pieTextColor = isDarkTheme ? Color.WHITE : Color.web("#1a1a1a");
+        Color pieTitleColor = isDarkTheme ? Color.LIGHTGRAY : Color.web("#333333");
+        for (Label lbl : piePercentLabelsMap.values()) {
+            if (lbl.getText() != null && !lbl.getText().equals("НЕДОСТУПНО")) {
+                String txt = lbl.getText();
+                boolean isError = lbl.getTextFill().equals(Color.web("#dc3545"));
+                if (!isError) lbl.setTextFill(pieTextColor);
+            } else {
+                lbl.setTextFill(Color.web("#6c757d"));
+            }
+        }
+        for (Label lbl : pieTitleLabelsMap.values()) {
+            lbl.setTextFill(pieTitleColor);
+        }
+
+        updateThemeButtonStyle(btnTheme);
+        btnTheme.setText(isDarkTheme ? "☀ Светлая тема" : "🌙 Тёмная тема");
+    }
+
+    private void applySidebarTheme() {
+        if (fleetSidebar != null) {
+            if (isDarkTheme) {
+                fleetSidebar.setStyle("-fx-background-color: #1e1e1e; -fx-border-color: #444444; -fx-border-width: 0 0 0 1;");
+            } else {
+                fleetSidebar.setStyle("-fx-background-color: #f1f5f9; -fx-border-color: #cbd5e1; -fx-border-width: 0 0 0 1;");
+            }
+        }
+    }
+
+    private void updateThemeButtonStyle(Button btnTheme) {
+        btnTheme.setStyle("-fx-background-color: transparent; -fx-text-fill: #facc15; -fx-border-color: #facc15; -fx-border-width: 1; -fx-border-radius: 5; -fx-padding: 6 16 6 16; -fx-font-weight: bold; -fx-cursor: hand;");
     }
 
     private Button createHeaderButton(String text, String accentColor) {
