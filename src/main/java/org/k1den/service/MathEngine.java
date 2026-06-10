@@ -136,14 +136,16 @@ public class MathEngine {
                 result.reason = "Норма";
             }
         } else {
-            if (lastValidY > avg * 1.5 && lastValidY > avg + (stdDev * sensitivity) && lastValidY > 50) {
-                result.status = "WARN";
-                result.reason = "Аномальный рост значения";
-            } else {
-                result.status = "OK";
-                result.reason = "Норма";
-            }
+        double currentVal = historyValues.get(n - 1);
+
+        if (currentVal > avg * 1.5 && currentVal > avg + (stdDev * sensitivity) && currentVal > 1.0) {
+            result.status = "WARN";
+            result.reason = "Аномальный рост";
+        } else {
+            result.status = "OK";
+            result.reason = "Норма";
         }
+    }
 
         return result;
     }
